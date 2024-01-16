@@ -1,4 +1,5 @@
 import dev.secondsun.retro.util.CA65Scanner
+import dev.secondsun.sfxoptimizer.allocate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -26,6 +27,30 @@ class RegisterAllocationTest {
         val expected = """
             iwt r1 , #5 
             stw ( r1 ) 
+
+        """.trimIndent()
+
+        val result = allocate(CA65Scanner().tokenize(code))
+        assertEquals(expected, result)
+
+
+    }
+
+    @Test
+    fun `trivial register selection with two variables`() {
+        val code = """
+            var example, example2
+            iwt example, #5
+            iwt example2, #15
+            stw(example)
+            stw(example2)
+        """.trimIndent()
+
+        val expected = """
+            iwt r1 , #5 
+            iwt r2 , #15 
+            stw ( r1 ) 
+            stw ( r2 ) 
 
         """.trimIndent()
 

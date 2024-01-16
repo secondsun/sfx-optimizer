@@ -1,13 +1,39 @@
+package dev.secondsun.sfxoptimizer
+
+
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenType
 import dev.secondsun.retro.util.vo.TokenizedFile
+import dev.secondsun.sfxoptimizer.Constants
 import dev.secondsun.sfxoptimizer.Constants.Register.*
+import java.util.*
+import kotlin.collections.HashMap
+
+sealed interface AllocationResult {
+    data class Register(val register:Constants.Register):AllocationResult;
+    object Spill:AllocationResult{};
+
+}
+data class AllocationContext(val registerPool:MutableList<Constants.Register> = mutableListOf(R1, R2, R3, R4, R5, R6,R7,R8,R9,R11), val parings:MutableMap<String, Constants.Register> = mutableMapOf()) {
+
+
+    fun allocate(label : String) : AllocationResult {
+        if (registerPool.isEmpty()) {
+            return AllocationResult.Spill
+        } else {
+            val register = registerPool.removeFirst()
+            parings[label] = register
+            return AllocationResult.Register(register)
+        }
+    }
+
+}
+
+
 
 fun allocate(program:TokenizedFile):String {
-
+    val context = AllocationContext()
     val output = StringBuilder()
-    val variables = mutableListOf<String>()
-    val registerPool = mutableSetOf(R0, R1, R2, R3, R4, R5, R6,R7,R8,R9,R11,R12,R13,R14);//R10 is reserved for stack, R15 is PC
     var dirtyLine = false;
 
     for (idx in 0..<program.textLines()) {
@@ -22,7 +48,9 @@ fun allocate(program:TokenizedFile):String {
             for (tokenIndex in 1..<line.tokens.size) {
                 val token = line.tokens[tokenIndex]
                 if (token.type == TokenType.TOK_IDENT) {
-                    variables.add(token.text())
+                    if (context.allocate(token.text()) is AllocationResult.Spill) {
+                        throw RuntimeException("Spill is not handled")
+                    }
                 }
             }
         } else if (isInstruction(firstToken)) {
@@ -31,7 +59,7 @@ fun allocate(program:TokenizedFile):String {
             for (tokenIndex in 1..<line.tokens.size) {
                 val token = line.tokens[tokenIndex]
                 if (isArgument(token)) {
-                    output.append("r1")
+                    output.append(context.parings[token.text()]?.label)
                     output.append(" ")
                     dirtyLine = true
                 } else {
