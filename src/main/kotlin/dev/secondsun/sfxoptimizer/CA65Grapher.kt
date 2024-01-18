@@ -1,7 +1,6 @@
 package dev.secondsun.sfxoptimizer
 
 import dev.secondsun.retro.util.FileService
-import dev.secondsun.retro.util.Location
 import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.instruction.GSUInstruction
@@ -111,18 +110,21 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
         _nodeCount += countChildren(startNode.main)
     }
 
-    private fun countChildren(node : CodeNode.CodeBlock, visiter : MutableSet<CodeNode.CodeBlock> = mutableSetOf()) :Int {
+    private fun countChildren(node : CodeNode.CodeBlock, visited : MutableSet<CodeNode.CodeBlock> = mutableSetOf()) :Int {
 
-        visiter.add(node)
+        if (visited.contains(node)) {
+            return visited.size;
+        }
+        visited.add(node)
 
         node.exits.forEach { exitNode ->
             when (exitNode) {
                 is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
-                is CodeNode.CodeBlock -> countChildren(exitNode, visiter)
+                is CodeNode.CodeBlock -> countChildren(exitNode, visited)
                 is CodeNode.End -> {}
             }
         }
-        return visiter.size
+        return visited.size
     }
 
     fun start(): CodeNode.Start {
