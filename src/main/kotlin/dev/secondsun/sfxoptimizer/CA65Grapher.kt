@@ -1,37 +1,104 @@
 package dev.secondsun.sfxoptimizer
 
+import dev.secondsun.retro.util.FileService
+import dev.secondsun.retro.util.Location
+import dev.secondsun.retro.util.SymbolService
+import dev.secondsun.retro.util.TokenAttribute
+import dev.secondsun.retro.util.instruction.GSUInstruction
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens
+import java.net.URI
 
-class CA65Grapher {
+typealias FileName = URI
+typealias LineNumber = Int
+class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileService: FileService = FileService()) {
+
+    val visitedMap = mutableMapOf<Pair<FileName, LineNumber>, CodeNode.CodeBlock>()
+
     private fun isConditionalJump(tokens: Tokens): Boolean {
-        TODO("Not yet implemented")
+        return GSUInstruction.conditionalJumpInstructions.stream().anyMatch { it.matches(tokens) };
+    }
+
+    private fun isUnconditionalJump(tokens: Tokens): Boolean {
+        return GSUInstruction.unconditionalJumpInstructions.stream().anyMatch { it.matches(tokens) };
     }
 
     fun graph(file: TokenizedFile, line: Int): CodeGraph {
+        val code = makeNode(file,line);
+        val start = CodeNode.Start(code)
+
+        return CodeGraph(start)
+    }
+
+    private fun makeNode(file: TokenizedFile, line: Int): CodeNode.CodeBlock {
         val code : CodeNode.CodeBlock = CodeNode.CodeBlock()
-        for (idx in 0..<file.textLines()) {
+
+        for (idx in line..<file.textLines()) {
+            if (visitedMap[Pair(file.uri, idx)] != null) {
+                val nextBlock = visitedMap[Pair(file.uri, idx)]!!
+                code.addExit(nextBlock);
+                nextBlock.addEntrance(code);
+                break;
+            } else {
+                visitedMap[Pair(file.uri, idx)] = code;
+            }
             val tokens = file.getLine(idx);
-            if (tokens != null && !tokens.tokens.isEmpty()) {
+            if (tokens != null && tokens.tokens.isNotEmpty()) {
+
                 if (isUnconditionalJump(tokens)) {
+                    code.addLine(tokens)
+                    if (idx == file.textLines()) {
+                        tokens.tokens[0].addAttribute(TokenAttribute.ERROR)
+                        tokens.tokens[0].message = "Unexpected end of file, branch instructions are always followed by an instruction"
+                    } else {
+                        val nextLine = file.getLine(idx+ 1) ;
+                        code.addLine(nextLine)
+                        val dest = tokens.tokens[1]
+                        //import next token
+                        //create exits
+                        val destinationLocation = symbolService.getLocation(dest.text())
+                        val nextBlock = makeNode(file, destinationLocation.line)
+
+                        code.addExit(nextBlock)
+                        nextBlock.addEntrance(code)
+                    }
+                    break;
+                } else if (isConditionalJump(tokens)) {
+                    code.addLine(tokens)
+                    val nextLine = file.getLine(idx+ 1) ;
+                    code.addLine(nextLine)
+
+                    // take the branch
+                    var dest = tokens.tokens[1]
                     //import next token
                     //create exits
-                } else if (isConditionalJump(tokens)) {
+                    var destinationLocation = symbolService.getLocation(dest.text())
+                    var nextBlock = makeNode(file, destinationLocation.line)
+
+                    code.addExit(nextBlock)
+                    nextBlock.addEntrance(code)
+
+                    //don't take the branch
+                    nextBlock = makeNode(file, idx + 2)
+
+                    code.addExit(nextBlock)
+                    nextBlock.addEntrance(code)
+                    break;
 
                 }
                 else {
                     code.addLine(tokens)
                 }
             }
+
+            if (idx == file.textLines()-1) {//end of file
+                code.addExit(CodeNode.End)
+            }
         }
-        val start = CodeNode.Start(code)
-        code.addExit(CodeNode.End)
-        return CodeGraph(start)
+        return code
     }
 
-    private fun isUnconditionalJump(tokens: Tokens): Boolean {
 
-    }
 
 }
 
@@ -44,23 +111,18 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
         _nodeCount += countChildren(startNode.main)
     }
 
-    private fun countChildren(node : CodeNode.CodeBlock):Int {
-        if (node.hasAttribute(CodeNode.Attribute.VISITED)) {
-            return 0
-        }
+    private fun countChildren(node : CodeNode.CodeBlock, visiter : MutableSet<CodeNode.CodeBlock> = mutableSetOf()) :Int {
 
-        node.setAttribute(CodeNode.Attribute.VISITED)
-
-        var count = node.exits.size
+        visiter.add(node)
 
         node.exits.forEach { exitNode ->
             when (exitNode) {
                 is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
-                is CodeNode.CodeBlock -> count += countChildren(exitNode)
+                is CodeNode.CodeBlock -> countChildren(exitNode, visiter)
                 is CodeNode.End -> {}
             }
         }
-        return count
+        return visiter.size
     }
 
     fun start(): CodeNode.Start {

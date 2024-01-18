@@ -1,4 +1,5 @@
 import dev.secondsun.retro.util.CA65Scanner
+import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.sfxoptimizer.CA65Grapher
 import dev.secondsun.sfxoptimizer.CodeNode
 import kotlin.test.Test
@@ -39,11 +40,40 @@ class CodeBlockTests {
     }
 
     @Test
+    fun `do conditional blocks make everything correctly`() {
+        val program = """
+            iwt r0 , #5 
+            add #0
+            beq next
+            nop()
+            
+            iwt r2 , #5 
+            stw ( r2 )
+            
+            next:
+            iwt r3 , #5 
+            stw ( r3 )
+            stop ; comment
+        """.trimIndent()
+
+        val file = (CA65Scanner().tokenize(program))
+        val symbolService = SymbolService()
+        symbolService.extractDefinitions(file)
+        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
+
+        assertEquals(5, codeGraph.nodeCount);
+        val exits = codeGraph.startNode.mainMethod().exits
+        assertEquals(2, exits.size)
+        assertEquals(2, exits[1]?.)
+
+    }
+
+    @Test
     fun `does a trivial jump generate 4 code nodes`() {
         val program = """
             iwt r1 , #5 
             stw ( r1 ) 
-            jmp next
+            bra next
             nop()
             iwt r2 , #5 
             stw ( r2 )
@@ -53,7 +83,9 @@ class CodeBlockTests {
         """.trimIndent()
 
         val file = (CA65Scanner().tokenize(program))
-        val codeGraph = CA65Grapher().graph(file = file, line = 0)
+        val symbolService = SymbolService()
+        symbolService.extractDefinitions(file)
+        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
         assertEquals(4, codeGraph.nodeCount);
 
         val codeNode :CodeNode.CodeBlock = codeGraph.start().mainMethod();
@@ -63,11 +95,10 @@ class CodeBlockTests {
 
         val afterJumpNode :CodeNode.CodeBlock = codeNode.exits[0] as CodeNode.CodeBlock;
 
-        assertEquals(2, afterJumpNode.lines.size);
-        assertEquals(2, afterJumpNode.lines.size);
+        assertEquals(3, afterJumpNode.lines.size);
         assertEquals(1, afterJumpNode.exits.size);
 
-        assertEquals("r3", afterJumpNode.lines[0].tokens[1].text())
+        assertEquals("r3", afterJumpNode.lines[1].tokens[1].text())
 
 
 
