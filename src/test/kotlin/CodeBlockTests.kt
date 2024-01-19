@@ -71,8 +71,8 @@ class CodeBlockTests {
 
         val block1 = codeGraph.startNode.mainMethod().exits[0] as CodeNode.CodeBlock
         val block2 = (block1).exits[0] as CodeNode.CodeBlock
-        val block3 = (block2 as CodeNode.CodeBlock).exits[1] as CodeNode.CodeBlock
-        val block4 = (block2 as CodeNode.CodeBlock).exits[0] as CodeNode.CodeBlock
+        val block3 = (block2 ).exits[1] as CodeNode.CodeBlock
+        val block4 = (block2 ).exits[0] as CodeNode.CodeBlock
         val block5 = block4.exits[0] as CodeNode.CodeBlock
         val block6 = block5.exits[1] as CodeNode.CodeBlock
 

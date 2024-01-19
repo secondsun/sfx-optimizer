@@ -1,6 +1,7 @@
 package dev.secondsun.sfxoptimizer
 
 import dev.secondsun.retro.util.FileService
+import dev.secondsun.retro.util.Location
 import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.instruction.GSUInstruction
@@ -30,14 +31,37 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     }
 
     private fun makeNode(file: TokenizedFile, line: Int): CodeNode.CodeBlock {
-        val code : CodeNode.CodeBlock = CodeNode.CodeBlock()
+        val code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0));
 
         for (idx in line..<file.textLines()) {
             if (visitedMap[Pair(file.uri, idx)] != null) {
                 val nextBlock = visitedMap[Pair(file.uri, idx)]!!
-                code.addExit(nextBlock);
-                nextBlock.addEntrance(code);
+
+                if (nextBlock.loc.line == idx) {
+                    code.addExit(nextBlock);
+                    nextBlock.addEntrance(code);
                 break;
+                    } else {
+                        val splitBlocks : Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> = nextBlock.split(idx)
+                        val block1 = splitBlocks.first
+                        val block2 = splitBlocks.second
+                        when {
+                            block1 is CodeNode.CodeBlock -> {
+                                val block1Start = block1.loc.line
+                                val block1End = idx
+                                for ( lineNu in block1Start..<block1End) {
+                                    visitedMap[Pair(block1.loc.filename ,lineNu)] = block1
+                                }
+                            }
+                            block2 is CodeNode.CodeBlock -> {
+                                val block2Start = idx
+                                val block2End = idx + block2.lines.size
+                                for ( lineNu in block2Start..<block2End) {
+                                    visitedMap[Pair(block2.loc.filename ,lineNu)] = block2
+                                }
+                            }
+                        }
+                    }
             } else {
                 visitedMap[Pair(file.uri, idx)] = code;
             }
@@ -141,6 +165,32 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
 }
 
 sealed class CodeNode {
+    private val _entrances = mutableListOf<CodeNode>()
+    private val _exits = mutableListOf<CodeNode>()
+
+    val entrances get() = _entrances.toList()
+    val exits get() = _exits.toList()
+
+    fun addEntrance(entry : CodeNode) : CodeNode {
+        _entrances.add(entry)
+        return this
+    }
+
+    fun addExit(entry : CodeNode) : CodeNode {
+        _exits.add(entry)
+        return this
+    }
+
+    fun removeEntrance(entry : CodeNode) : CodeNode {
+        _entrances.remove(entry)
+        return this
+    }
+
+    fun removeExit(entry : CodeNode) : CodeNode {
+        _exits.remove(entry)
+        return this
+    }
+
 
     enum class Attribute{ VISITED }
 
@@ -154,24 +204,10 @@ sealed class CodeNode {
 
     data object End : CodeNode()
 
-    class CodeBlock : CodeNode() {
-        private val _entrances = mutableListOf<CodeNode>()
-        private val _exits = mutableListOf<CodeNode>()
+    class CodeBlock(var loc : Location) : CodeNode() {
         private val _lines = mutableListOf<Tokens>()
 
         val lines get() = _lines.toList()
-        val entrances get() = _entrances.toList()
-        val exits get() = _exits.toList()
-
-        fun addEntrance(entry : CodeNode) : CodeBlock {
-            _entrances.add(entry)
-            return this
-        }
-
-        fun addExit(entry : CodeNode) : CodeBlock {
-            _exits.add(entry)
-            return this
-        }
 
         fun addLine(entry : Tokens) : CodeBlock {
             _lines.add(entry)
@@ -183,6 +219,36 @@ sealed class CodeNode {
         }
         fun setAttribute(attr: Attribute){
             attributes.add(attr)
+        }
+
+        fun split(idx: Int): Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> {
+            //make two new nodes
+            //link nodes
+            //move this.entrances to newNodes[0]
+            //move this.exits to newNode[1]
+            val block1Loc = loc;
+            val block2Loc = Location(loc.filename, idx,0,0);
+
+            val block1 = CodeBlock(block1Loc)
+            val block2 = CodeBlock(block2Loc)
+
+            for ( line:Int in loc.line..<idx) {
+                block1.addLine(lines[line-loc.line])
+            }
+            for ( line:Int in idx..<lines.size + loc.line) {
+                block2.addLine(lines[line-loc.line])
+            }
+            block1.addExit(block2)
+            block2.addEntrance(block1)
+            entrances.forEach({node ->
+                node.removeExit(this)
+                node.addExit(block1)
+            })
+            exits.forEach( { node ->
+                node.removeEntrance(this)
+                node.addEntrance(block2)
+            })
+            return Pair(block1,block2)
         }
     }
 }
