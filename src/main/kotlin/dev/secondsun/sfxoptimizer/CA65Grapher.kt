@@ -34,7 +34,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         val code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0));
 
         for (idx in line..<file.textLines()) {
-            if (visitedMap[Pair(file.uri, idx)] != null) {
+            if (visitedMap[Pair(file.uri, idx)] != null) {//Have we jumped into an existing block?
                 val nextBlock = visitedMap[Pair(file.uri, idx)]!!
 
                 if (nextBlock.loc.line == idx) {
