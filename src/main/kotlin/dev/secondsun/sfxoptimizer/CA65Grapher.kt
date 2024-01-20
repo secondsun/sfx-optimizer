@@ -1,9 +1,6 @@
 package dev.secondsun.sfxoptimizer
 
-import dev.secondsun.retro.util.FileService
-import dev.secondsun.retro.util.Location
-import dev.secondsun.retro.util.SymbolService
-import dev.secondsun.retro.util.TokenAttribute
+import dev.secondsun.retro.util.*
 import dev.secondsun.retro.util.instruction.GSUInstruction
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens
@@ -31,42 +28,34 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     }
 
     private fun makeNode(file: TokenizedFile, line: Int): CodeNode.CodeBlock {
-        val code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0));
+        var code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0));
+
 
         for (idx in line..<file.textLines()) {
             if (visitedMap[Pair(file.uri, idx)] != null) {//Have we jumped into an existing block?
                 val nextBlock = visitedMap[Pair(file.uri, idx)]!!
 
-                if (nextBlock.loc.line == idx) {
+                if (nextBlock.loc.line == idx) {//we jumped to the start of a block, no split needed
                     code.addExit(nextBlock);
                     nextBlock.addEntrance(code);
-                break;
-                    } else {
-                        val splitBlocks : Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> = nextBlock.split(idx)
-                        val block1 = splitBlocks.first
-                        val block2 = splitBlocks.second
-                        when {
-                            block1 is CodeNode.CodeBlock -> {
-                                val block1Start = block1.loc.line
-                                val block1End = idx
-                                for ( lineNu in block1Start..<block1End) {
-                                    visitedMap[Pair(block1.loc.filename ,lineNu)] = block1
-                                }
-                            }
-                            block2 is CodeNode.CodeBlock -> {
-                                val block2Start = idx
-                                val block2End = idx + block2.lines.size
-                                for ( lineNu in block2Start..<block2End) {
-                                    visitedMap[Pair(block2.loc.filename ,lineNu)] = block2
-                                }
-                            }
-                        }
+                    break;
+                } else {
+                    val splitBlocks : Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> = nextBlock.split(idx)
+
+                    val block2 = splitBlocks.second
+                    val block2Start = idx
+                    val block2End = idx + block2.lines.size
+                    for ( lineNu in block2Start..<block2End) {
+                        visitedMap[Pair(block2.loc.filename ,lineNu)] = block2
                     }
+                    return block2
+                }
+
             } else {
-                visitedMap[Pair(file.uri, idx)] = code;
+                visitedMap[Pair(file.uri, idx)] = code
             }
-            val tokens = file.getLine(idx);
-            if (tokens != null && tokens.tokens.isNotEmpty()) {
+            val tokens = file.getLine(idx)
+            if (tokens != null ) {
 
                 if (isUnconditionalJump(tokens)) {
                     code.addLine(tokens)
@@ -80,7 +69,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                         //import next token
                         //create exits
                         val destinationLocation = symbolService.getLocation(dest.text())
-                        val nextBlock = makeNode(file, destinationLocation.line)
+                        val nextBlock = makeNode(file, destinationLocation.line - 1)
 
                         code.addExit(nextBlock)
                         nextBlock.addEntrance(code)
@@ -98,20 +87,36 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     var destinationLocation = symbolService.getLocation(dest.text())
                     var nextBlock = makeNode(file, destinationLocation.line)
 
-                    code.addExit(nextBlock)
-                    nextBlock.addEntrance(code)
+                    if (code.exits.contains(nextBlock) && nextBlock.entrances.contains(code)) {
+                        // nextBlock used to be part of code and they split
+                        // so nextblock links to itself (see codeblock test for an example)
+                        nextBlock.addEntrance(nextBlock)
+                        nextBlock.addExit(nextBlock)
+                        val newCode = nextBlock
+                        //don't take the branch
+                        nextBlock = makeNode(file, idx + 2)
 
-                    //don't take the branch
-                    nextBlock = makeNode(file, idx + 2)
+                        newCode.addExit(nextBlock)
+                        nextBlock.addEntrance(newCode)
+                    } else { //create don't take the branch s
 
-                    code.addExit(nextBlock)
-                    nextBlock.addEntrance(code)
+                        code.addExit(nextBlock)
+                        nextBlock.addEntrance(code)
+
+                        //don't take the branch
+                        nextBlock = makeNode(file, idx + 2)
+
+                        code.addExit(nextBlock)
+                        nextBlock.addEntrance(code)
+                    }
                     break;
 
                 }
                 else {
                     code.addLine(tokens)
                 }
+            } else {
+                code.addLine(Tokens("", emptyList()))
             }
 
             if (idx == file.textLines()-1) {//end of file
@@ -151,6 +156,31 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
         return visited.size
     }
 
+    fun print(node : CodeNode.CodeBlock = startNode.main, visited : MutableSet<CodeNode.CodeBlock> = mutableSetOf(),indent :String = "") :String {
+
+        if (visited.contains(node)) {
+            return "";
+        }
+        val builder = StringBuilder()
+        visited.add(node)
+        builder.appendLine("---- Node start ---")
+        builder.appendLine("Hashcode \t: ${node.hashCode()}")
+        builder.appendLine("Entrances \t: ${node.entrances.joinToString(","){it->it.hashCode().toString()}}" )
+        builder.appendLine("Exits \t\t: ${node.exits.joinToString(","){it->it.hashCode().toString()}}" )
+        builder.appendLine(node.lines.joinToString("") { tokens ->  indent + tokens.line })
+
+        node.exits.forEach { exitNode ->
+            when (exitNode) {
+                is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
+                is CodeNode.CodeBlock -> builder.appendLine(print(exitNode, visited, indent + "\t"))
+                is CodeNode.End -> {}
+            }
+        }
+        builder.appendLine("---- Node end ---")
+        return builder.toString()
+    }
+
+
     fun start(): CodeNode.Start {
         return startNode
     }
@@ -165,8 +195,8 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
 }
 
 sealed class CodeNode {
-    private val _entrances = mutableListOf<CodeNode>()
-    private val _exits = mutableListOf<CodeNode>()
+    internal var _entrances = mutableListOf<CodeNode>()
+    internal var _exits = mutableListOf<CodeNode>()
 
     val entrances get() = _entrances.toList()
     val exits get() = _exits.toList()
@@ -200,12 +230,14 @@ sealed class CodeNode {
         fun mainMethod(): CodeNode.CodeBlock {
             return main
         }
+
+
     }
 
     data object End : CodeNode()
 
     class CodeBlock(var loc : Location) : CodeNode() {
-        private val _lines = mutableListOf<Tokens>()
+        private var _lines = mutableListOf<Tokens>()
 
         val lines get() = _lines.toList()
 
@@ -226,29 +258,35 @@ sealed class CodeNode {
             //link nodes
             //move this.entrances to newNodes[0]
             //move this.exits to newNode[1]
-            val block1Loc = loc;
+
+
             val block2Loc = Location(loc.filename, idx,0,0);
 
-            val block1 = CodeBlock(block1Loc)
+
             val block2 = CodeBlock(block2Loc)
 
-            for ( line:Int in loc.line..<idx) {
-                block1.addLine(lines[line-loc.line])
-            }
             for ( line:Int in idx..<lines.size + loc.line) {
                 block2.addLine(lines[line-loc.line])
             }
-            block1.addExit(block2)
-            block2.addEntrance(block1)
-            entrances.forEach({node ->
-                node.removeExit(this)
-                node.addExit(block1)
-            })
+
+            _lines = mutableListOf<Tokens>().apply {
+                addAll(_lines.subList(0,idx-loc.line))
+            }
+
+
+            block2.addEntrance(this)
+
             exits.forEach( { node ->
                 node.removeEntrance(this)
                 node.addEntrance(block2)
+                block2.addExit(node)
             })
-            return Pair(block1,block2)
+
+            exits.forEach({removeExit(it)})
+
+            this.addExit(block2)
+
+            return Pair(this,block2)
         }
     }
 }

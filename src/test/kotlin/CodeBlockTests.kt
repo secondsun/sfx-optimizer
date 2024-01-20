@@ -33,33 +33,58 @@ class CodeBlockTests {
         assertEquals(3, codeGraph.nodeCount);
         assertTrue(codeGraph.start() is CodeNode.Start);
 
-        val codeNode :CodeNode.CodeBlock = codeGraph.start().mainMethod();
+        val codeNode: CodeNode.CodeBlock = codeGraph.start().mainMethod();
 
         assertEquals(2, codeNode.lines.size);
         assertTrue(codeGraph.end() is CodeNode.End);
     }
 
     @Test
-    fun `do conditional blocks make everything correctly`() {
+    fun `split code node when it is jumped into midway`() {
         val program = """
-            iwt r0 , #5 
-            add #0
-            
-            label:
-            beq next
-            nop()
-            
-            iwt r2 , #5 
-            stw ( r2 )
-            
-            next:
-            iwt r3 , #5 
-            stw ( r3 )
-            
-            beq label
-            nop
-            
-            stop ; comment
+               iwt r0 , #5 ;-
+               
+               label:
+               beq label
+               nop
+               
+               stop
+               """.trimMargin()
+        val file = (CA65Scanner().tokenize(program))
+        val symbolService = SymbolService()
+        symbolService.extractDefinitions(file)
+        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
+
+        println(codeGraph.print())
+
+        assertEquals(5, codeGraph.nodeCount);
+        assertEquals(1, codeGraph.startNode.mainMethod().exits.size)
+        //the second node links to itself
+        assertEquals(2, codeGraph.startNode.mainMethod().exits.get(0).exits.size)
+        assertEquals(2, codeGraph.startNode.mainMethod().exits.get(0).entrances.size)
+   }
+
+
+    @Test
+    fun `do conditional blocks make everything correctly`() {
+        val program ="""
+               iwt r0 , #5 ;-
+               add #0      ;-
+               
+               label:
+               beq next
+               nop()
+               
+               iwt r2 , #5 ;-
+               stw ( r2 )  ;-
+               
+               next:                   ;-
+               iwt r3 , #5        ;-
+               stw ( r3 )         ;-
+               beq label          ;-
+               nop              ;-
+               
+               stop ; comment -
         """.trimIndent()
 
         val file = (CA65Scanner().tokenize(program))
@@ -67,7 +92,9 @@ class CodeBlockTests {
         symbolService.extractDefinitions(file)
         val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
 
-        assertEquals(8, codeGraph.nodeCount);
+        println(codeGraph.print())
+
+        assertEquals(7, codeGraph.nodeCount);
 
         val block1 = codeGraph.startNode.mainMethod().exits[0] as CodeNode.CodeBlock
         val block2 = (block1).exits[0] as CodeNode.CodeBlock
@@ -87,6 +114,18 @@ class CodeBlockTests {
 
     }
 
+    @Test
+    fun `code nodes must include empty lines`() {
+        val program = """iwt r4, #$5
+            
+            iwt r6,#$9
+            """
+        val file = CA65Scanner().tokenize(program)
+        val codeGraph = CA65Grapher().graph(file, line = 0)
+        assertEquals(3, codeGraph.nodeCount);
+        assertEquals(3, codeGraph.startNode.mainMethod().lines.size)
+
+    }
     @Test
     fun `does a trivial jump generate 4 code nodes`() {
         val program = """
