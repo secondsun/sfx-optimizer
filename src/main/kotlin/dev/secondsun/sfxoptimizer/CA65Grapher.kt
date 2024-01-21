@@ -27,18 +27,14 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return CodeGraph(start)
     }
 
-    private fun makeNode(file: TokenizedFile, line: Int): CodeNode.CodeBlock {
-        var code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0));
-
+    private fun makeNode(file: TokenizedFile, line: Int, code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0))): CodeNode.CodeBlock {
 
         for (idx in line..<file.textLines()) {
             if (visitedMap[Pair(file.uri, idx)] != null) {//Have we jumped into an existing block?
                 val nextBlock = visitedMap[Pair(file.uri, idx)]!!
 
                 if (nextBlock.loc.line == idx) {//we jumped to the start of a block, no split needed
-                    code.addExit(nextBlock);
-                    nextBlock.addEntrance(code);
-                    break;
+                    return nextBlock
                 } else {
                     val splitBlocks : Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> = nextBlock.split(idx)
 
@@ -57,7 +53,15 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
             val tokens = file.getLine(idx)
             if (tokens != null ) {
 
-                if (isUnconditionalJump(tokens)) {
+                if(isLabelDef(tokens)) {
+                    val newNode = CodeNode.CodeBlock(Location(file.uri(), idx,0,0));
+                    newNode.addEntrance(code)
+                    code.addExit(newNode)
+                    newNode.addLine(tokens)
+                    visitedMap[Pair(file.uri, idx)] = newNode
+                    makeNode(file, idx+1, newNode)
+                    return code
+                } else if (isUnconditionalJump(tokens)) {
                     code.addLine(tokens)
                     if (idx == file.textLines()) {
                         tokens.tokens[0].addAttribute(TokenAttribute.ERROR)
@@ -69,7 +73,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                         //import next token
                         //create exits
                         val destinationLocation = symbolService.getLocation(dest.text())
-                        val nextBlock = makeNode(file, destinationLocation.line - 1)
+                        val nextBlock = makeNode(file, destinationLocation.line )
 
                         code.addExit(nextBlock)
                         nextBlock.addEntrance(code)
@@ -87,32 +91,16 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     var destinationLocation = symbolService.getLocation(dest.text())
                     var nextBlock = makeNode(file, destinationLocation.line)
 
-                    if (code.exits.contains(nextBlock) && nextBlock.entrances.contains(code)) {
-                        // nextBlock used to be part of code and they split
-                        // so nextblock links to itself (see codeblock test for an example)
-                        nextBlock.addEntrance(nextBlock)
-                        nextBlock.addExit(nextBlock)
-                        val newCode = nextBlock
-                        //don't take the branch
-                        nextBlock = makeNode(file, idx + 2)
+                    code.addExit(nextBlock)
+                    nextBlock.addEntrance(code)
 
-                        newCode.addExit(nextBlock)
-                        nextBlock.addEntrance(newCode)
-                    } else { //create don't take the branch s
+                    //don't take the branch
+                    nextBlock = makeNode(file, idx + 2)
 
-                        code.addExit(nextBlock)
-                        nextBlock.addEntrance(code)
-
-                        //don't take the branch
-                        nextBlock = makeNode(file, idx + 2)
-
-                        code.addExit(nextBlock)
-                        nextBlock.addEntrance(code)
-                    }
+                    code.addExit(nextBlock)
+                    nextBlock.addEntrance(code)
                     break;
-
-                }
-                else {
+                } else {
                     code.addLine(tokens)
                 }
             } else {
@@ -126,6 +114,10 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return code
     }
 
+    private fun isLabelDef(tokens: Tokens): Boolean {
+        val tokensList =  tokens.tokens;
+        return tokensList.size ==2 && tokensList[0].type == TokenType.TOK_IDENT && tokensList[1].type == TokenType.TOK_COLON
+    }
 
 
 }

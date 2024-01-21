@@ -132,13 +132,15 @@ class CodeBlockTests {
             iwt r1 , #5 
             stw ( r1 ) 
             bra next
-            nop()
+            nop
+
             iwt r2 , #5 
             stw ( r2 )
+            
             next:
             iwt r3 , #5 
             stw ( r3 ) 
-        """.trimIndent()
+        """.trimMargin()
 
         val file = (CA65Scanner().tokenize(program))
         val symbolService = SymbolService()
