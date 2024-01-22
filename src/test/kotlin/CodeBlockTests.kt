@@ -96,7 +96,7 @@ class CodeBlockTests {
 
         assertEquals(7, codeGraph.nodeCount);
 
-        val block1 = codeGraph.startNode.mainMethod().exits[0] as CodeNode.CodeBlock
+        val block1 = codeGraph.startNode.mainMethod() as CodeNode.CodeBlock
         val block2 = (block1).exits[0] as CodeNode.CodeBlock
         val block3 = (block2 ).exits[1] as CodeNode.CodeBlock
         val block4 = (block2 ).exits[0] as CodeNode.CodeBlock
@@ -109,8 +109,7 @@ class CodeBlockTests {
         assertEquals(2, block2.entrances.size)
         assertEquals(2, block5.exits.size)
         assertEquals(3, (block2).lines.size)
-        assertEquals(2, (block4).lines.size)
-        assertEquals(1, (block6).lines.size)
+        assertEquals(5, (block4).lines.size)
 
     }
 
@@ -146,6 +145,7 @@ class CodeBlockTests {
         val symbolService = SymbolService()
         symbolService.extractDefinitions(file)
         val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
+        println(codeGraph.print())
         assertEquals(4, codeGraph.nodeCount);
 
         val codeNode :CodeNode.CodeBlock = codeGraph.start().mainMethod();

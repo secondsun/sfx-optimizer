@@ -33,8 +33,12 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
             if (visitedMap[Pair(file.uri, idx)] != null) {//Have we jumped into an existing block?
                 val nextBlock = visitedMap[Pair(file.uri, idx)]!!
 
-                if (nextBlock.loc.line == idx) {//we jumped to the start of a block, no split needed
+                if (nextBlock.loc.line == idx && line == idx) {//we jumped to the start of a block, no split needed
                     return nextBlock
+                } else if (nextBlock.loc.line == idx ) { //we reached an existing block. create exits and return
+                    code.addExit(nextBlock)
+                    nextBlock.addEntrance(code)
+                    return code
                 } else {
                     val splitBlocks : Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> = nextBlock.split(idx)
 
@@ -53,7 +57,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
             val tokens = file.getLine(idx)
             if (tokens != null ) {
 
-                if(isLabelDef(tokens)) {
+                if(isLabelDef(tokens) && code.lines.isNotEmpty()) {
                     val newNode = CodeNode.CodeBlock(Location(file.uri(), idx,0,0));
                     newNode.addEntrance(code)
                     code.addExit(newNode)
