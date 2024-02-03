@@ -27,19 +27,24 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return CodeGraph(start)
     }
 
+    /**
+     * Recursive
+     * stes though a @param file starting at @param line.
+     * You may provide an initial block with @param code
+     */
     private fun makeNode(file: TokenizedFile, line: Int, code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0))): CodeNode.CodeBlock {
 
         for (idx in line..<file.textLines()) {
-            if (visitedMap[Pair(file.uri, idx)] != null) {//Have we jumped into an existing block?
+            if (visitedMap[Pair(file.uri, idx)] != null) { //Have we jumped/stepped into an existing block?
                 val nextBlock = visitedMap[Pair(file.uri, idx)]!!
 
                 if (nextBlock.loc.line == idx && line == idx) {//we jumped to the start of a block, no split needed
                     return nextBlock
-                } else if (nextBlock.loc.line == idx ) { //we reached an existing block. create exits and return
+                } else if (nextBlock.loc.line == idx ) { //we stepped into an existing block. create exits and return
                     code.addExit(nextBlock)
                     nextBlock.addEntrance(code)
                     return code
-                } else {
+                } else { //We jumped into the middle of a block. We must split it and rearrange old entrances and exits
                     val splitBlocks : Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> = nextBlock.split(idx)
 
                     val block2 = splitBlocks.second
@@ -233,6 +238,10 @@ sealed class CodeNode {
     data object End : CodeNode()
 
     class CodeBlock(var loc : Location) : CodeNode() {
+        private val _intervals:Map<IntervalKey, Interval> = mutableMapOf()
+        val intervals get() = _intervals.toMap()
+
+        val registersUsed: Iterable<Constants.Register>? = null
         private var _lines = mutableListOf<Tokens>()
 
         val lines get() = _lines.toList()
@@ -284,5 +293,6 @@ sealed class CodeNode {
 
             return Pair(this,block2)
         }
+
     }
 }

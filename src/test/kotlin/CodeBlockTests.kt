@@ -2,7 +2,10 @@ import dev.secondsun.retro.util.CA65Scanner
 import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.sfxoptimizer.CA65Grapher
 import dev.secondsun.sfxoptimizer.CodeNode
+import dev.secondsun.sfxoptimizer.Constants
+import dev.secondsun.sfxoptimizer.IntervalKey
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -40,6 +43,35 @@ class CodeBlockTests {
     }
 
     @Test
+    fun `function blocks`() {
+        val program = """
+            function somename variable1
+                var output
+                from variable1
+                to output
+                add  #$5
+                return output 
+            endfunction
+            
+            var input, output
+            iwt input, #5
+            call output = somename input
+            stop
+            
+        """.trimMargin()
+
+        val file = (CA65Scanner().tokenize(program))
+        val symbolService = SymbolService()
+        symbolService.extractDefinitions(file)
+        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 8)
+        assertEquals(5, codeGraph.nodeCount)
+
+
+
+
+    }
+
+    @Test
     fun `split code node when it is jumped into midway`() {
         val program = """
                iwt r0 , #5 ;-
@@ -57,11 +89,13 @@ class CodeBlockTests {
 
         println(codeGraph.print())
 
+        val main = codeGraph.startNode.mainMethod()
+
         assertEquals(5, codeGraph.nodeCount);
-        assertEquals(1, codeGraph.startNode.mainMethod().exits.size)
+        assertEquals(1, main.exits.size)
         //the second node links to itself
-        assertEquals(2, codeGraph.startNode.mainMethod().exits.get(0).exits.size)
-        assertEquals(2, codeGraph.startNode.mainMethod().exits.get(0).entrances.size)
+        assertEquals(2, main.exits.get(0).exits.size)
+        assertEquals(2, main.exits.get(0).entrances.size)
    }
 
 
@@ -148,19 +182,26 @@ class CodeBlockTests {
         println(codeGraph.print())
         assertEquals(4, codeGraph.nodeCount);
 
-        val codeNode :CodeNode.CodeBlock = codeGraph.start().mainMethod();
+        val main :CodeNode.CodeBlock = codeGraph.start().mainMethod();
 
-        assertEquals(4, codeNode.lines.size);
-        assertEquals(1, codeNode.exits.size);
+        assertEquals(4, main.lines.size);
+        assertEquals(1, main.exits.size);
 
-        val afterJumpNode :CodeNode.CodeBlock = codeNode.exits[0] as CodeNode.CodeBlock;
+        val afterJumpNode :CodeNode.CodeBlock = main.exits[0] as CodeNode.CodeBlock;
 
         assertEquals(3, afterJumpNode.lines.size);
         assertEquals(1, afterJumpNode.exits.size);
 
         assertEquals("r3", afterJumpNode.lines[1].tokens[1].text())
 
+        assertContentEquals(listOf(Constants.Register.R0, Constants.Register.R1), main.registersUsed)
+        assertContentEquals(listOf(Constants.Register.R0, Constants.Register.R3), afterJumpNode.registersUsed)
 
+        //TODO add intervals per block
+        assertEquals(10,afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.start)
+        assertEquals(11,afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.end)
+        assertEquals(11,afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
+        assertEquals(11,afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
 
     }
 
