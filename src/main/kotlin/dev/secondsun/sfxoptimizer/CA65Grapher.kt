@@ -2,13 +2,20 @@ package dev.secondsun.sfxoptimizer
 
 import dev.secondsun.retro.util.*
 import dev.secondsun.retro.util.instruction.GSUInstruction
+import dev.secondsun.retro.util.instruction.Instructions
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens
+import dev.secondsun.sfxoptimizer.Constants.register
 import java.net.URI
+
+
 
 typealias FileName = URI
 typealias LineNumber = Int
 class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileService: FileService = FileService()) {
+
+    private var sReg: Token? = null
+    private var dReg: Token? = null
 
     val visitedMap = mutableMapOf<Pair<FileName, LineNumber>, CodeNode.CodeBlock>()
 
@@ -109,7 +116,111 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     code.addExit(nextBlock)
                     nextBlock.addEntrance(code)
                     break;
-                } else {
+                } else { // Not a jump, handle register and variable intervals
+                    val firstToken = tokens[0]
+                    if (GSUInstruction.isInstruction(firstToken)) {
+                        val instruction = Instructions.values().find { it.instruction.matches(tokens) }
+                        if (instruction != null) {
+                            when(instruction){
+                                Instructions.FROM -> {sReg = (tokens[1])}
+                                Instructions.TO ->   {dReg = (tokens[1])}
+                                Instructions.WITH -> {
+                                    sReg = (tokens[1])
+                                    dReg = (tokens[1])
+                                }
+                                Instructions.JMP -> code.addRead(tokens[1])
+                                Instructions.LJMP -> code.addRead(tokens[1])
+                                Instructions.BRA -> {}
+                                Instructions.IWT_JUMP -> {}
+                                Instructions.ADC_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.ADC_CONST -> TODO()
+                                Instructions.ADD_REGISTER -> TODO()
+                                Instructions.ADD_CONST -> TODO()
+                                Instructions.ALT1 -> TODO()
+                                Instructions.ALT2 -> TODO()
+                                Instructions.ALT3 -> TODO()
+                                Instructions.AND_REGISTER -> TODO()
+                                Instructions.AND_CONST -> TODO()
+                                Instructions.ASR -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.BCC -> TODO()
+                                Instructions.BCS -> TODO()
+                                Instructions.BEQ -> TODO()
+                                Instructions.BGE -> TODO()
+                                Instructions.BIC_REGISTER -> TODO()
+                                Instructions.BIC_CONST -> TODO()
+                                Instructions.BLT -> TODO()
+                                Instructions.BMI -> TODO()
+                                Instructions.BNE -> TODO()
+                                Instructions.BPL -> TODO()
+                                Instructions.BVC -> TODO()
+                                Instructions.BVS -> TODO()
+                                Instructions.CACHE -> TODO()
+                                Instructions.CMODE -> TODO()
+                                Instructions.CMP -> TODO()
+                                Instructions.COLOR -> TODO()
+                                Instructions.DEC -> TODO()
+                                Instructions.DIV2 -> TODO()
+                                Instructions.FMULT -> TODO()
+
+                                Instructions.GETB -> TODO()
+                                Instructions.GETBH -> TODO()
+                                Instructions.GETBL -> TODO()
+                                Instructions.GETBS -> TODO()
+                                Instructions.GETC -> TODO()
+                                Instructions.HIB -> TODO()
+                                Instructions.IBT -> code.addWrite(tokens[1])
+                                Instructions.INC -> TODO()
+                                Instructions.IWT -> code.addWrite(tokens[1])
+                                Instructions.LDB -> TODO()
+                                Instructions.LDW -> TODO()
+                                Instructions.LINK -> TODO()
+                                Instructions.LM -> TODO()
+                                Instructions.LMS -> TODO()
+                                Instructions.LMULT -> TODO()
+                                Instructions.LOB -> TODO()
+                                Instructions.LOOP -> TODO()
+                                Instructions.LSR -> TODO()
+                                Instructions.MERGE -> TODO()
+                                Instructions.MOVE -> TODO()
+                                Instructions.MOVES -> TODO()
+                                Instructions.MULT_REGISTER -> TODO()
+                                Instructions.MULT_CONST -> TODO()
+                                Instructions.NOP -> TODO()
+                                Instructions.NOT -> TODO()
+                                Instructions.OR_REGISTER -> TODO()
+                                Instructions.OR_CONST -> TODO()
+                                Instructions.PLOT -> TODO()
+                                Instructions.RAMB -> TODO()
+                                Instructions.ROL -> TODO()
+                                Instructions.ROMB -> TODO()
+                                Instructions.ROR -> TODO()
+                                Instructions.RPIX -> TODO()
+                                Instructions.SBC -> TODO()
+                                Instructions.SBK -> TODO()
+                                Instructions.SEX -> TODO()
+                                Instructions.SM -> TODO()
+                                Instructions.SMS -> TODO()
+                                Instructions.STB -> TODO()
+                                Instructions.STOP -> TODO()
+                                Instructions.STW -> {useSreg(code, firstToken.lineNumber);dReg=null;code.addRead(tokens[2])}
+                                Instructions.SUB_REGISTER -> TODO()
+                                Instructions.SUB_CONST -> TODO()
+                                Instructions.SWAP -> TODO()
+
+                                Instructions.UMULT_REGISTER -> TODO()
+                                Instructions.UMULT_CONST -> TODO()
+
+                                Instructions.XOR_REGISTER -> TODO()
+                                Instructions.XOR_CONST -> TODO()
+                            }
+                        } else {
+                            firstToken.apply {
+                                addAttribute(TokenAttribute.ERROR)
+                                message = "${firstToken.text()} is incorrect. Correct form : TODO"
+                            }
+
+                        }
+                    }
                     code.addLine(tokens)
                 }
             } else {
@@ -123,6 +234,30 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return code
     }
 
+    private fun useSreg(code:CodeNode.CodeBlock, line:Int) {
+
+        if (sReg != null) {
+            sReg!!.lineNumber = line
+            code.addRead(sReg!!)
+        } else {
+            code.addRead(Constants.Register.R0, line)
+        }
+
+        sReg = null
+    }
+
+    private fun useDreg(code:CodeNode.CodeBlock, line:Int) {
+        if (dReg != null) {
+            dReg!!.lineNumber = line
+            code.addWrite(dReg!!)
+        } else {
+            code.addWrite(Constants.Register.R0, line)
+        }
+
+        dReg = null
+    }
+
+
     private fun isLabelDef(tokens: Tokens): Boolean {
         val tokensList =  tokens.tokens;
         return tokensList.size ==2 && tokensList[0].type == TokenType.TOK_IDENT && tokensList[1].type == TokenType.TOK_COLON
@@ -130,6 +265,12 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
 
 
 }
+
+private operator fun Tokens.get(i: Int): Token {
+    return tokens[i]
+}
+
+
 
 class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.End) {
 
@@ -238,10 +379,10 @@ sealed class CodeNode {
     data object End : CodeNode()
 
     class CodeBlock(var loc : Location) : CodeNode() {
-        private val _intervals:Map<IntervalKey, Interval> = mutableMapOf()
+        private val _intervals = mutableMapOf<IntervalKey, Interval>()
         val intervals get() = _intervals.toMap()
 
-        val registersUsed: Iterable<Constants.Register>? = null
+        val registersUsed: List<Constants.Register> get() = (_intervals.keys.filter { it is IntervalKey.RegisterKey }.map { (it as IntervalKey.RegisterKey).register })
         private var _lines = mutableListOf<Tokens>()
 
         val lines get() = _lines.toList()
@@ -250,6 +391,49 @@ sealed class CodeNode {
             _lines.add(entry)
             return this
         }
+
+
+         fun addWrite(token: Token) {
+             if (Constants.isRegister(token.text())) {
+                 register(token.text())?.let {
+                     val key = IntervalKey.RegisterKey(it)
+                     val interval = _intervals[key]?:Interval(key)
+                     interval.addWrite(token.lineNumber)
+                     _intervals.put(key, interval)
+                 }
+
+             } else {
+                 TODO("Add Label interval")
+             }
+
+        }
+
+         fun addWrite(register: Constants.Register, lineNumber:Int) {
+             val key = IntervalKey.RegisterKey(register)
+             val interval = _intervals[key]?:Interval(key)
+             interval.addWrite(lineNumber)
+             _intervals.put(key, interval)
+        }
+         fun addRead(register: Constants.Register, lineNumber:Int) {
+             val key = IntervalKey.RegisterKey(register)
+             val interval = _intervals[key]?:Interval(key)
+             interval.addRead(lineNumber)
+             _intervals.put(key, interval)
+        }
+        fun addRead(token: Token) {
+            if (Constants.isRegister(token.text())) {
+                register(token.text())?.let {
+                    val key = IntervalKey.RegisterKey(it)
+                    val interval = _intervals[key]?:Interval(key)
+                    interval.addRead(token.lineNumber)
+                    _intervals.put(key, interval)
+                }
+
+            } else {
+                TODO("Add Label interval")
+            }
+        }
+
 
         fun hasAttribute(attr: Attribute): Boolean {
             return attributes.contains(attr)

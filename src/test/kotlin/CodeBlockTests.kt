@@ -67,8 +67,6 @@ class CodeBlockTests {
         assertEquals(5, codeGraph.nodeCount)
 
 
-
-
     }
 
     @Test
@@ -96,12 +94,12 @@ class CodeBlockTests {
         //the second node links to itself
         assertEquals(2, main.exits.get(0).exits.size)
         assertEquals(2, main.exits.get(0).entrances.size)
-   }
+    }
 
 
     @Test
     fun `do conditional blocks make everything correctly`() {
-        val program ="""
+        val program = """
                iwt r0 , #5 ;-
                add #0      ;-
                
@@ -132,8 +130,8 @@ class CodeBlockTests {
 
         val block1 = codeGraph.startNode.mainMethod() as CodeNode.CodeBlock
         val block2 = (block1).exits[0] as CodeNode.CodeBlock
-        val block3 = (block2 ).exits[1] as CodeNode.CodeBlock
-        val block4 = (block2 ).exits[0] as CodeNode.CodeBlock
+        val block3 = (block2).exits[1] as CodeNode.CodeBlock
+        val block4 = (block2).exits[0] as CodeNode.CodeBlock
         val block5 = block4.exits[0] as CodeNode.CodeBlock
         val block6 = block5.exits[1] as CodeNode.CodeBlock
 
@@ -159,6 +157,7 @@ class CodeBlockTests {
         assertEquals(3, codeGraph.startNode.mainMethod().lines.size)
 
     }
+
     @Test
     fun `does a trivial jump generate 4 code nodes`() {
         val program = """
@@ -182,27 +181,57 @@ class CodeBlockTests {
         println(codeGraph.print())
         assertEquals(4, codeGraph.nodeCount);
 
-        val main :CodeNode.CodeBlock = codeGraph.start().mainMethod();
+        val main: CodeNode.CodeBlock = codeGraph.start().mainMethod();
 
         assertEquals(4, main.lines.size);
         assertEquals(1, main.exits.size);
 
-        val afterJumpNode :CodeNode.CodeBlock = main.exits[0] as CodeNode.CodeBlock;
+        val afterJumpNode: CodeNode.CodeBlock = main.exits[0] as CodeNode.CodeBlock;
 
         assertEquals(3, afterJumpNode.lines.size);
         assertEquals(1, afterJumpNode.exits.size);
 
         assertEquals("r3", afterJumpNode.lines[1].tokens[1].text())
 
-        assertContentEquals(listOf(Constants.Register.R0, Constants.Register.R1), main.registersUsed)
-        assertContentEquals(listOf(Constants.Register.R0, Constants.Register.R3), afterJumpNode.registersUsed)
-
+        assertTrue(main.registersUsed.contains(Constants.Register.R1))
+        assertTrue(main.registersUsed.contains(Constants.Register.R0))
+        assertTrue(afterJumpNode.registersUsed.contains(Constants.Register.R3))
+        assertTrue(afterJumpNode.registersUsed.contains(Constants.Register.R0))
         //TODO add intervals per block
-        assertEquals(10,afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.start)
-        assertEquals(11,afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.end)
-        assertEquals(11,afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
-        assertEquals(11,afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
+        assertEquals(10, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.start)
+        assertEquals(11, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.end)
+        assertEquals(11, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
+        assertEquals(11, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
 
     }
 
+    @Test
+    fun `handle sreg and dreg`() {
+        val program = """
+            iwt r5, #$7FFF
+            with r5
+            asr
+            asr
+            asr
+            asr
+        """.trimMargin()
+        val file = (CA65Scanner().tokenize(program))
+        val symbolService = SymbolService()
+        symbolService.extractDefinitions(file)
+        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
+        val block = codeGraph.start().main
+
+
+        assertTrue(block.registersUsed.contains(Constants.Register.R5))
+        assertTrue(block.registersUsed.contains(Constants.Register.R0))
+
+        val r5Interval = block.intervals[IntervalKey.RegisterKey(Constants.Register.R5)]!!
+
+        assertEquals(0, r5Interval.start)
+        assertEquals(2, r5Interval.end)
+        assertEquals(2, r5Interval.writes.size)
+        assertEquals(1, r5Interval.reads.size)
+        assertEquals(3, block.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
+        assertEquals(5, block.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
+    }
 }

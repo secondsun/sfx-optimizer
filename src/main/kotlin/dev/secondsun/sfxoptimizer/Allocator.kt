@@ -3,6 +3,7 @@ package dev.secondsun.sfxoptimizer
 
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenType
+import dev.secondsun.retro.util.instruction.GSUInstruction
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.sfxoptimizer.Constants
 import dev.secondsun.sfxoptimizer.Constants.Register.*
@@ -53,7 +54,7 @@ fun allocate(program:TokenizedFile):String {
                     }
                 }
             }
-        } else if (isInstruction(firstToken)) {
+        } else if (GSUInstruction.isInstruction(firstToken)) {
             output.append(firstToken.text())
             output.append(" ")
             for (tokenIndex in 1..<line.tokens.size) {
@@ -96,9 +97,3 @@ fun isArgument(token: Token): Boolean {
     return token.type == TokenType.TOK_IDENT
 }
 
-/**
- * Is the Token a GSU Instruction?
- */
-fun isInstruction(firstToken: Token): Boolean {
-    return true
-}

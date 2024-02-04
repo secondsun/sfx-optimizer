@@ -24,7 +24,7 @@ object Constants {
 
 
     fun register(token:String) : Register? {
-        return Register.values().find { token.uppercase().equals(it.label) }
+        return Register.values().find { token.trim().lowercase().equals(it.label) }
     }
 
     fun isRegister(token:String): Boolean {
