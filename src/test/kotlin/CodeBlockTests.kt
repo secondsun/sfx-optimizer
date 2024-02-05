@@ -5,7 +5,6 @@ import dev.secondsun.sfxoptimizer.CodeNode
 import dev.secondsun.sfxoptimizer.Constants
 import dev.secondsun.sfxoptimizer.IntervalKey
 import kotlin.test.Test
-import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -63,8 +62,10 @@ class CodeBlockTests {
         val file = (CA65Scanner().tokenize(program))
         val symbolService = SymbolService()
         symbolService.extractDefinitions(file)
-        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 8)
-        assertEquals(5, codeGraph.nodeCount)
+        val programGraph = CA65Grapher(symbolService).graph(file = file, line = 8)
+        val mainCodeGraph = programGraph
+
+        assertEquals(6, mainCodeGraph.nodeCount) //Call nodes get their own node
 
 
     }
@@ -178,7 +179,7 @@ class CodeBlockTests {
         val symbolService = SymbolService()
         symbolService.extractDefinitions(file)
         val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
-        println(codeGraph.print())
+        //println(codeGraph.print())
         assertEquals(4, codeGraph.nodeCount);
 
         val main: CodeNode.CodeBlock = codeGraph.start().mainMethod();
@@ -198,10 +199,10 @@ class CodeBlockTests {
         assertTrue(afterJumpNode.registersUsed.contains(Constants.Register.R3))
         assertTrue(afterJumpNode.registersUsed.contains(Constants.Register.R0))
         //TODO add intervals per block
-        assertEquals(10, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.start)
-        assertEquals(11, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.end)
-        assertEquals(11, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
-        assertEquals(11, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
+        assertEquals(9, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.start)
+        assertEquals(10, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.end)
+        assertEquals(10, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
+        assertEquals(10, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
 
     }
 

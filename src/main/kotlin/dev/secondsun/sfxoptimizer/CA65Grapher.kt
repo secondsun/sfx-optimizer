@@ -28,10 +28,21 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     }
 
     fun graph(file: TokenizedFile, line: Int): CodeGraph {
-        val code = makeNode(file,line);
-        val start = CodeNode.Start(code)
+        val mainNode = makeNode(file,line);
+        val start = CodeNode.Start(mainNode)
+        val programGraph = CodeGraph(start)
 
-        return CodeGraph(start)
+        TODO("Add Functions to Program Graph")
+
+        symbolService.definitions.values.forEach {
+
+        }
+
+        return programGraph
+    }
+
+    private fun graphFunction(location: Location) {
+        TODO("Not yet implemented")
     }
 
     /**
@@ -128,58 +139,58 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                                     sReg = (tokens[1])
                                     dReg = (tokens[1])
                                 }
-                                Instructions.JMP -> code.addRead(tokens[1])
-                                Instructions.LJMP -> code.addRead(tokens[1])
+                                Instructions.JMP -> {sReg = null;dReg = null;code.addRead(tokens[1])}
+                                Instructions.LJMP -> {sReg = null;dReg = null;code.addRead(tokens[1])}
                                 Instructions.BRA -> {}
-                                Instructions.IWT_JUMP -> {}
+                                Instructions.IWT_JUMP -> {sReg = null;dReg = null;}
                                 Instructions.ADC_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
-                                Instructions.ADC_CONST -> TODO()
-                                Instructions.ADD_REGISTER -> TODO()
-                                Instructions.ADD_CONST -> TODO()
-                                Instructions.ALT1 -> TODO()
-                                Instructions.ALT2 -> TODO()
-                                Instructions.ALT3 -> TODO()
-                                Instructions.AND_REGISTER -> TODO()
-                                Instructions.AND_CONST -> TODO()
+                                Instructions.ADC_CONST -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.ADD_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.ADD_CONST -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.ALT1 -> {}
+                                Instructions.ALT2 -> {}
+                                Instructions.ALT3 -> {}
+                                Instructions.AND_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.AND_CONST -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.ASR -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.BCC -> TODO()
-                                Instructions.BCS -> TODO()
-                                Instructions.BEQ -> TODO()
-                                Instructions.BGE -> TODO()
-                                Instructions.BIC_REGISTER -> TODO()
-                                Instructions.BIC_CONST -> TODO()
-                                Instructions.BLT -> TODO()
-                                Instructions.BMI -> TODO()
-                                Instructions.BNE -> TODO()
-                                Instructions.BPL -> TODO()
-                                Instructions.BVC -> TODO()
-                                Instructions.BVS -> TODO()
-                                Instructions.CACHE -> TODO()
-                                Instructions.CMODE -> TODO()
-                                Instructions.CMP -> TODO()
-                                Instructions.COLOR -> TODO()
-                                Instructions.DEC -> TODO()
-                                Instructions.DIV2 -> TODO()
-                                Instructions.FMULT -> TODO()
+                                Instructions.BCC -> {}
+                                Instructions.BCS -> {}
+                                Instructions.BEQ -> {}
+                                Instructions.BGE -> {}
+                                Instructions.BIC_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.BIC_CONST -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.BLT -> {}
+                                Instructions.BMI -> {}
+                                Instructions.BNE -> {}
+                                Instructions.BPL -> {}
+                                Instructions.BVC -> {}
+                                Instructions.BVS -> {}
+                                Instructions.CACHE -> {sReg = null;dReg = null}
+                                Instructions.CMODE -> {useSreg(code, firstToken.lineNumber);dReg = null}
+                                Instructions.CMP -> {useSreg(code, firstToken.lineNumber);dReg = null}
+                                Instructions.COLOR -> {useSreg(code, firstToken.lineNumber);dReg = null}
+                                Instructions.DEC -> {sReg = null;dReg = null;code.addRead(tokens[1]);code.addWrite(tokens[1])}
+                                Instructions.DIV2 -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.FMULT -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(Constants.Register.R6, firstToken.lineNumber)}
 
-                                Instructions.GETB -> TODO()
-                                Instructions.GETBH -> TODO()
-                                Instructions.GETBL -> TODO()
-                                Instructions.GETBS -> TODO()
-                                Instructions.GETC -> TODO()
-                                Instructions.HIB -> TODO()
-                                Instructions.IBT -> code.addWrite(tokens[1])
-                                Instructions.INC -> TODO()
-                                Instructions.IWT -> code.addWrite(tokens[1])
-                                Instructions.LDB -> TODO()
-                                Instructions.LDW -> TODO()
-                                Instructions.LINK -> TODO()
-                                Instructions.LM -> TODO()
-                                Instructions.LMS -> TODO()
-                                Instructions.LMULT -> TODO()
-                                Instructions.LOB -> TODO()
-                                Instructions.LOOP -> TODO()
-                                Instructions.LSR -> TODO()
+                                Instructions.GETB -> {sReg = null;useDreg(code, firstToken.lineNumber)}
+                                Instructions.GETBH -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.GETBL -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.GETBS ->{sReg = null;useDreg(code, firstToken.lineNumber)}
+                                Instructions.GETC -> {sReg = null;dReg = null}
+                                Instructions.HIB -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.IBT -> {sReg = null;dReg = null;code.addWrite(tokens[1])}
+                                Instructions.INC -> {sReg = null;dReg = null;code.addRead(tokens[1]);code.addWrite(tokens[1])}
+                                Instructions.IWT -> {sReg = null;dReg = null;code.addWrite(tokens[1])}
+                                Instructions.LDB -> {sReg = null;useDreg(code, firstToken.lineNumber);code.addRead(tokens[2]); }
+                                Instructions.LDW -> {sReg = null;useDreg(code, firstToken.lineNumber);code.addRead(tokens[2]); }
+                                Instructions.LINK -> {sReg = null;dReg = null;code.addWrite(Constants.Register.R11, firstToken.lineNumber)}
+                                Instructions.LM -> {sReg = null;dReg = null;code.addWrite(tokens[1])}
+                                Instructions.LMS -> {sReg = null;dReg = null;code.addWrite(tokens[1])}
+                                Instructions.LMULT -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(Constants.Register.R6, firstToken.lineNumber);code.addWrite(Constants.Register.R4, firstToken.lineNumber)}
+                                Instructions.LOB -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.LOOP -> {code.addRead(Constants.Register.R13, firstToken.lineNumber);code.addWrite(Constants.Register.R12, firstToken.lineNumber)}
+                                Instructions.LSR -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.MERGE -> TODO()
                                 Instructions.MOVE -> TODO()
                                 Instructions.MOVES -> TODO()
@@ -201,7 +212,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                                 Instructions.SM -> TODO()
                                 Instructions.SMS -> TODO()
                                 Instructions.STB -> TODO()
-                                Instructions.STOP -> TODO()
+                                Instructions.STOP -> {sReg = null;dReg = null;}
                                 Instructions.STW -> {useSreg(code, firstToken.lineNumber);dReg=null;code.addRead(tokens[2])}
                                 Instructions.SUB_REGISTER -> TODO()
                                 Instructions.SUB_CONST -> TODO()
@@ -281,7 +292,14 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
         _nodeCount += countChildren(startNode.main)
     }
 
-    private fun countChildren(node : CodeNode.CodeBlock, visited : MutableSet<CodeNode.CodeBlock> = mutableSetOf()) :Int {
+
+    fun traverse(visitor:CodeNodeVisitor, visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.startNode) {
+        node.accept(visitor)
+        visited.add(node)
+        node.exits.forEach { traverse(visitor, visited, it) }
+    }
+
+    private fun countChildren(node : CodeNode, visited : MutableSet<CodeNode> = mutableSetOf()) :Int {
 
         if (visited.contains(node)) {
             return visited.size;
@@ -291,14 +309,14 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
         node.exits.forEach { exitNode ->
             when (exitNode) {
                 is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
-                is CodeNode.CodeBlock -> countChildren(exitNode, visited)
+                is CodeNode.CodeBlock, is CodeNode.CallBlock -> countChildren(exitNode, visited)
                 is CodeNode.End -> {}
             }
         }
         return visited.size
     }
 
-    fun print(node : CodeNode.CodeBlock = startNode.main, visited : MutableSet<CodeNode.CodeBlock> = mutableSetOf(),indent :String = "") :String {
+    fun print(node : CodeNode.CodeBlock = startNode.main, visited : MutableSet<CodeNode> = mutableSetOf(),indent :String = "") :String {
 
         if (visited.contains(node)) {
             return "";
@@ -316,6 +334,7 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
                 is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
                 is CodeNode.CodeBlock -> builder.appendLine(print(exitNode, visited, indent + "\t"))
                 is CodeNode.End -> {}
+                is CodeNode.CallBlock -> builder.appendLine(exitNode.line.line())
             }
         }
         builder.appendLine("---- Node end ---")
@@ -337,14 +356,22 @@ class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.
 }
 
 sealed class CodeNode {
-    internal var _entrances = mutableListOf<CodeNode>()
-    internal var _exits = mutableListOf<CodeNode>()
+
+    private var _entrances = mutableListOf<CodeNode>()
+    private var _exits = mutableListOf<CodeNode>()
+
 
     val entrances get() = _entrances.toList()
     val exits get() = _exits.toList()
 
+
+    fun accept(visitor:CodeNodeVisitor) {
+        visitor.visit(this)
+    }
+
     fun addEntrance(entry : CodeNode) : CodeNode {
         _entrances.add(entry)
+
         return this
     }
 
@@ -477,6 +504,10 @@ sealed class CodeNode {
 
             return Pair(this,block2)
         }
+
+    }
+
+    data class CallBlock(val location: Location,val  line:Tokens) : CodeNode() {
 
     }
 }
