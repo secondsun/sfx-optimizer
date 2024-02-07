@@ -1,9 +1,12 @@
 import dev.secondsun.retro.util.CA65Scanner
+import dev.secondsun.retro.util.FileService
 import dev.secondsun.retro.util.SymbolService
+import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.sfxoptimizer.CA65Grapher
 import dev.secondsun.sfxoptimizer.CodeNode
 import dev.secondsun.sfxoptimizer.Constants
 import dev.secondsun.sfxoptimizer.IntervalKey
+import java.net.URI
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -44,28 +47,31 @@ class CodeBlockTests {
     @Test
     fun `function blocks`() {
         val program = """
-            function somename variable1
+            function somename 
                 var output
                 from variable1
                 to output
                 add  #$5
-                return output 
+                return  
             endfunction
             
             var input, output
             iwt input, #5
-            call output = somename input
+            call somename 
             stop
             
         """.trimMargin()
 
         val file = (CA65Scanner().tokenize(program))
+        file.uri = URI.create("./test.sgs")
+        val fileService = MockFileService(file)
+
         val symbolService = SymbolService()
         symbolService.extractDefinitions(file)
-        val programGraph = CA65Grapher(symbolService).graph(file = file, line = 8)
+        val programGraph = CA65Grapher(symbolService,fileService).graph(file = file, line = 8)
         val mainCodeGraph = programGraph
 
-        assertEquals(6, mainCodeGraph.nodeCount) //Call nodes get their own node
+        assertEquals(5, mainCodeGraph.nodeCount) //Call nodes get their own node
 
 
     }
@@ -217,9 +223,11 @@ class CodeBlockTests {
             asr
         """.trimMargin()
         val file = (CA65Scanner().tokenize(program))
+        file.uri = URI.create("./file.sgs")
+        val fileService = MockFileService(file)
         val symbolService = SymbolService()
         symbolService.extractDefinitions(file)
-        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
+        val codeGraph = CA65Grapher(symbolService, fileService).graph(file = file, line = 0)
         val block = codeGraph.start().main
 
 
@@ -234,5 +242,15 @@ class CodeBlockTests {
         assertEquals(1, r5Interval.reads.size)
         assertEquals(3, block.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
         assertEquals(5, block.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
+    }
+}
+
+class MockFileService(val file:TokenizedFile) : FileService() {
+    override fun readLines(fileUri: URI?): TokenizedFile {
+        return file
+    }
+
+    override fun find(file: URI?, vararg optionalSearchPaths: URI?): MutableList<URI> {
+        return mutableListOf(this.file.uri)
     }
 }

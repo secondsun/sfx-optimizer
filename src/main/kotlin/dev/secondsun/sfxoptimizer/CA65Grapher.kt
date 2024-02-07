@@ -5,7 +5,6 @@ import dev.secondsun.retro.util.instruction.GSUInstruction
 import dev.secondsun.retro.util.instruction.Instructions
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens
-import dev.secondsun.sfxoptimizer.Constants.register
 import java.net.URI
 
 
@@ -32,22 +31,21 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         val start = CodeNode.Start(mainNode)
         val programGraph = CodeGraph(start)
 
-        TODO("Add Functions to Program Graph")
-
-        symbolService.definitions.values.forEach {
-
-        }
 
         return programGraph
     }
 
-    private fun graphFunction(location: Location) {
-        TODO("Not yet implemented")
+    fun graphFunction(functionName : String): CodeNode.FunctionStart {
+        val location = symbolService.getLocation(functionName)
+
+        val functionBody = graph(fileService.readLines(location.filename), location.line+1)
+        val functionNode = CodeNode.FunctionStart(functionName, location, functionBody)
+        return functionNode;
     }
 
     /**
      * Recursive
-     * stes though a @param file starting at @param line.
+     * steps though a @param file starting at @param line.
      * You may provide an initial block with @param code
      */
     private fun makeNode(file: TokenizedFile, line: Int, code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0))): CodeNode.CodeBlock {
@@ -74,13 +72,14 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     return block2
                 }
 
-            } else {
+            } else { //This is a new line in the code block.
                 visitedMap[Pair(file.uri, idx)] = code
             }
             val tokens = file.getLine(idx)
             if (tokens != null ) {
 
-                if(isLabelDef(tokens) && code.lines.isNotEmpty()) {
+                if(isLabelDef(tokens) && code.lines.isNotEmpty()) {//label definitions start a new block
+                    //Close current block and start a new one.
                     val newNode = CodeNode.CodeBlock(Location(file.uri(), idx,0,0));
                     newNode.addEntrance(code)
                     code.addExit(newNode)
@@ -126,6 +125,21 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
 
                     code.addExit(nextBlock)
                     nextBlock.addEntrance(code)
+                    break;
+                } else if (isReturnOrEndFunction(tokens)) {//handle return
+                    code.addLine(tokens)
+                    code.addExit(CodeNode.End)
+                    break;
+                } else if (isCall(tokens)) {
+                    val functionNode = graphFunction(tokens.tokens[1].text().trim());
+                    val callBlock = CodeNode.CallBlock(functionNode)
+                    code.addExit(callBlock)
+                    callBlock.addEntrance(code)
+
+                    val nextBlock = makeNode(file, idx + 1)
+
+                    callBlock.addExit(nextBlock)
+                    nextBlock.addEntrance(callBlock)
                     break;
                 } else { // Not a jump, handle register and variable intervals
                     val firstToken = tokens[0]
@@ -205,7 +219,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                                 Instructions.ROL -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.ROMB -> {useSreg(code, firstToken.lineNumber); dReg=null }
                                 Instructions.ROR -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.RPIX -> {sReg = null; useDreg(code,firstToken.lineNumber)}
+                                Instructions.RPIX -> {sReg = null; useDreg(code,firstToken.lineNumber);code.addRead(Constants.Register.R2, firstToken.lineNumber);code.addRead(Constants.Register.R1, firstToken.lineNumber)}
                                 Instructions.SBC -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
                                 Instructions.SBK -> {useSreg(code, firstToken.lineNumber);dReg = null}
                                 Instructions.SEX -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
@@ -243,6 +257,19 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
             }
         }
         return code
+    }
+
+    private fun isCall(tokens: Tokens): Boolean {
+        return tokens.tokens.size == 2 && tokens.tokens[0].text().trim().lowercase().equals("call")
+    }
+
+    private fun isReturnOrEndFunction(tokens: Tokens): Boolean {
+        val tokensList = tokens.tokens
+        if (tokensList.size != 1) {
+            return false;
+        }
+        val token = tokens[0].text().trim().lowercase()
+        return token.equals("endfunction") || token.equals("return")
     }
 
     private fun useSreg(code:CodeNode.CodeBlock, line:Int) {
@@ -283,231 +310,3 @@ private operator fun Tokens.get(i: Int): Token {
 
 
 
-class CodeGraph(val startNode:CodeNode.Start, val end : CodeNode.End = CodeNode.End) {
-
-    private var _nodeCount = 0
-    val nodeCount get() = _nodeCount
-    init {
-        _nodeCount = 2//start node and end node
-        _nodeCount += countChildren(startNode.main)
-    }
-
-
-    fun traverse(visitor:CodeNodeVisitor, visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.startNode) {
-        node.accept(visitor)
-        visited.add(node)
-        node.exits.forEach { traverse(visitor, visited, it) }
-    }
-
-    private fun countChildren(node : CodeNode, visited : MutableSet<CodeNode> = mutableSetOf()) :Int {
-
-        if (visited.contains(node)) {
-            return visited.size;
-        }
-        visited.add(node)
-
-        node.exits.forEach { exitNode ->
-            when (exitNode) {
-                is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
-                is CodeNode.CodeBlock, is CodeNode.CallBlock -> countChildren(exitNode, visited)
-                is CodeNode.End -> {}
-            }
-        }
-        return visited.size
-    }
-
-    fun print(node : CodeNode.CodeBlock = startNode.main, visited : MutableSet<CodeNode> = mutableSetOf(),indent :String = "") :String {
-
-        if (visited.contains(node)) {
-            return "";
-        }
-        val builder = StringBuilder()
-        visited.add(node)
-        builder.appendLine("---- Node start ---")
-        builder.appendLine("Hashcode \t: ${node.hashCode()}")
-        builder.appendLine("Entrances \t: ${node.entrances.joinToString(","){it->it.hashCode().toString()}}" )
-        builder.appendLine("Exits \t\t: ${node.exits.joinToString(","){it->it.hashCode().toString()}}" )
-        builder.appendLine(node.lines.joinToString("") { tokens ->  indent + tokens.line })
-
-        node.exits.forEach { exitNode ->
-            when (exitNode) {
-                is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
-                is CodeNode.CodeBlock -> builder.appendLine(print(exitNode, visited, indent + "\t"))
-                is CodeNode.End -> {}
-                is CodeNode.CallBlock -> builder.appendLine(exitNode.line.line())
-            }
-        }
-        builder.appendLine("---- Node end ---")
-        return builder.toString()
-    }
-
-
-    fun start(): CodeNode.Start {
-        return startNode
-    }
-
-
-
-
-    fun end(): CodeNode.End {
-        return end
-    }
-
-}
-
-sealed class CodeNode {
-
-    private var _entrances = mutableListOf<CodeNode>()
-    private var _exits = mutableListOf<CodeNode>()
-
-
-    val entrances get() = _entrances.toList()
-    val exits get() = _exits.toList()
-
-
-    fun accept(visitor:CodeNodeVisitor) {
-        visitor.visit(this)
-    }
-
-    fun addEntrance(entry : CodeNode) : CodeNode {
-        _entrances.add(entry)
-
-        return this
-    }
-
-    fun addExit(entry : CodeNode) : CodeNode {
-        _exits.add(entry)
-        return this
-    }
-
-    fun removeEntrance(entry : CodeNode) : CodeNode {
-        _entrances.remove(entry)
-        return this
-    }
-
-    fun removeExit(entry : CodeNode) : CodeNode {
-        _exits.remove(entry)
-        return this
-    }
-
-
-    enum class Attribute{ VISITED }
-
-    val attributes = mutableSetOf<Attribute>()
-
-    data class Start(val main:CodeNode.CodeBlock) : CodeNode() {
-        fun mainMethod(): CodeNode.CodeBlock {
-            return main
-        }
-
-
-    }
-
-    data object End : CodeNode()
-
-    class CodeBlock(var loc : Location) : CodeNode() {
-        private val _intervals = mutableMapOf<IntervalKey, Interval>()
-        val intervals get() = _intervals.toMap()
-
-        val registersUsed: List<Constants.Register> get() = (_intervals.keys.filter { it is IntervalKey.RegisterKey }.map { (it as IntervalKey.RegisterKey).register })
-        private var _lines = mutableListOf<Tokens>()
-
-        val lines get() = _lines.toList()
-
-        fun addLine(entry : Tokens) : CodeBlock {
-            _lines.add(entry)
-            return this
-        }
-
-
-         fun addWrite(token: Token) {
-             if (Constants.isRegister(token.text())) {
-                 register(token.text())?.let {
-                     val key = IntervalKey.RegisterKey(it)
-                     val interval = _intervals[key]?:Interval(key)
-                     interval.addWrite(token.lineNumber)
-                     _intervals.put(key, interval)
-                 }
-
-             } else {
-                 TODO("Add Label interval")
-             }
-
-        }
-
-         fun addWrite(register: Constants.Register, lineNumber:Int) {
-             val key = IntervalKey.RegisterKey(register)
-             val interval = _intervals[key]?:Interval(key)
-             interval.addWrite(lineNumber)
-             _intervals.put(key, interval)
-        }
-         fun addRead(register: Constants.Register, lineNumber:Int) {
-             val key = IntervalKey.RegisterKey(register)
-             val interval = _intervals[key]?:Interval(key)
-             interval.addRead(lineNumber)
-             _intervals.put(key, interval)
-        }
-        fun addRead(token: Token) {
-            if (Constants.isRegister(token.text())) {
-                register(token.text())?.let {
-                    val key = IntervalKey.RegisterKey(it)
-                    val interval = _intervals[key]?:Interval(key)
-                    interval.addRead(token.lineNumber)
-                    _intervals.put(key, interval)
-                }
-
-            } else {
-                TODO("Add Label interval")
-            }
-        }
-
-
-        fun hasAttribute(attr: Attribute): Boolean {
-            return attributes.contains(attr)
-        }
-        fun setAttribute(attr: Attribute){
-            attributes.add(attr)
-        }
-
-        fun split(idx: Int): Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> {
-            //make two new nodes
-            //link nodes
-            //move this.entrances to newNodes[0]
-            //move this.exits to newNode[1]
-
-
-            val block2Loc = Location(loc.filename, idx,0,0);
-
-
-            val block2 = CodeBlock(block2Loc)
-
-            for ( line:Int in idx..<lines.size + loc.line) {
-                block2.addLine(lines[line-loc.line])
-            }
-
-            _lines = mutableListOf<Tokens>().apply {
-                addAll(_lines.subList(0,idx-loc.line))
-            }
-
-
-            block2.addEntrance(this)
-
-            exits.forEach( { node ->
-                node.removeEntrance(this)
-                node.addEntrance(block2)
-                block2.addExit(node)
-            })
-
-            exits.forEach({removeExit(it)})
-
-            this.addExit(block2)
-
-            return Pair(this,block2)
-        }
-
-    }
-
-    data class CallBlock(val location: Location,val  line:Tokens) : CodeNode() {
-
-    }
-}
