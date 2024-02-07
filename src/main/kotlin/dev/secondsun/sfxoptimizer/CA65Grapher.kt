@@ -173,11 +173,11 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                                 Instructions.DIV2 -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.FMULT -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(Constants.Register.R6, firstToken.lineNumber)}
 
-                                Instructions.GETB -> {sReg = null;useDreg(code, firstToken.lineNumber)}
-                                Instructions.GETBH -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.GETBL -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.GETBS ->{sReg = null;useDreg(code, firstToken.lineNumber)}
-                                Instructions.GETC -> {sReg = null;dReg = null}
+                                Instructions.GETB -> {sReg = null;useDreg(code, firstToken.lineNumber); code.addRead(Constants.Register.R14, firstToken.lineNumber)}
+                                Instructions.GETBH -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber); code.addRead(Constants.Register.R14, firstToken.lineNumber)}
+                                Instructions.GETBL -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber); code.addRead(Constants.Register.R14, firstToken.lineNumber)}
+                                Instructions.GETBS ->{sReg = null;useDreg(code, firstToken.lineNumber); code.addRead(Constants.Register.R14, firstToken.lineNumber)}
+                                Instructions.GETC -> {sReg = null;dReg = null; code.addRead(Constants.Register.R14, firstToken.lineNumber)}
                                 Instructions.HIB -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.IBT -> {sReg = null;dReg = null;code.addWrite(tokens[1])}
                                 Instructions.INC -> {sReg = null;dReg = null;code.addRead(tokens[1]);code.addWrite(tokens[1])}
@@ -191,38 +191,38 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                                 Instructions.LOB -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.LOOP -> {code.addRead(Constants.Register.R13, firstToken.lineNumber);code.addWrite(Constants.Register.R12, firstToken.lineNumber)}
                                 Instructions.LSR -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.MERGE -> TODO()
-                                Instructions.MOVE -> TODO()
-                                Instructions.MOVES -> TODO()
-                                Instructions.MULT_REGISTER -> TODO()
-                                Instructions.MULT_CONST -> TODO()
-                                Instructions.NOP -> TODO()
-                                Instructions.NOT -> TODO()
-                                Instructions.OR_REGISTER -> TODO()
-                                Instructions.OR_CONST -> TODO()
-                                Instructions.PLOT -> TODO()
-                                Instructions.RAMB -> TODO()
-                                Instructions.ROL -> TODO()
-                                Instructions.ROMB -> TODO()
-                                Instructions.ROR -> TODO()
-                                Instructions.RPIX -> TODO()
-                                Instructions.SBC -> TODO()
-                                Instructions.SBK -> TODO()
-                                Instructions.SEX -> TODO()
-                                Instructions.SM -> TODO()
-                                Instructions.SMS -> TODO()
-                                Instructions.STB -> TODO()
+                                Instructions.MERGE -> {useDreg(code, firstToken.lineNumber);sReg = null;code.addRead(Constants.Register.R7, firstToken.lineNumber);code.addRead(Constants.Register.R8, firstToken.lineNumber)}
+                                Instructions.MOVE -> {sReg = null;dReg = null;code.addWrite(tokens[1]);code.addRead(tokens[3])}
+                                Instructions.MOVES -> {sReg = null;dReg = null;code.addWrite(tokens[1]);}
+                                Instructions.MULT_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.MULT_CONST -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.NOP -> {sReg = null;dReg = null;}
+                                Instructions.NOT ->  {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.OR_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.OR_CONST ->    {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.PLOT -> {code.addRead(Constants.Register.R1, firstToken.lineNumber);code.addRead(Constants.Register.R2, firstToken.lineNumber) }
+                                Instructions.RAMB -> {useSreg(code, firstToken.lineNumber); dReg=null }
+                                Instructions.ROL -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.ROMB -> {useSreg(code, firstToken.lineNumber); dReg=null }
+                                Instructions.ROR -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.RPIX -> {sReg = null; useDreg(code,firstToken.lineNumber)}
+                                Instructions.SBC -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.SBK -> {useSreg(code, firstToken.lineNumber);dReg = null}
+                                Instructions.SEX -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.SM -> {sReg = null;dReg = null;code.addRead(tokens[5])}
+                                Instructions.SMS -> {sReg = null;dReg = null;code.addRead(tokens[2])}
+                                Instructions.STB -> {useSreg(code, firstToken.lineNumber);dReg=null;code.addRead(tokens[2])}
                                 Instructions.STOP -> {sReg = null;dReg = null;}
                                 Instructions.STW -> {useSreg(code, firstToken.lineNumber);dReg=null;code.addRead(tokens[2])}
-                                Instructions.SUB_REGISTER -> TODO()
-                                Instructions.SUB_CONST -> TODO()
-                                Instructions.SWAP -> TODO()
+                                Instructions.SUB_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.SUB_CONST ->    {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
+                                Instructions.SWAP -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
 
-                                Instructions.UMULT_REGISTER -> TODO()
-                                Instructions.UMULT_CONST -> TODO()
+                                Instructions.UMULT_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.UMULT_CONST ->    {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
 
-                                Instructions.XOR_REGISTER -> TODO()
-                                Instructions.XOR_CONST -> TODO()
+                                Instructions.XOR_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
+                                Instructions.XOR_CONST ->    {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                             }
                         } else {
                             firstToken.apply {
