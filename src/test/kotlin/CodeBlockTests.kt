@@ -6,6 +6,7 @@ import dev.secondsun.sfxoptimizer.CA65Grapher
 import dev.secondsun.sfxoptimizer.CodeNode
 import dev.secondsun.sfxoptimizer.Constants
 import dev.secondsun.sfxoptimizer.IntervalKey
+import org.junit.jupiter.api.Assertions.assertNotNull
 import java.net.URI
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -72,6 +73,10 @@ class CodeBlockTests {
         val mainCodeGraph = programGraph
 
         assertEquals(5, mainCodeGraph.nodeCount) //Call nodes get their own node
+
+        var functionNode = programGraph.getFunction("somename")
+        assertNotNull(functionNode)
+        assertEquals(3, functionNode!!.functionBody.nodeCount)
 
 
     }
@@ -204,12 +209,65 @@ class CodeBlockTests {
         assertTrue(main.registersUsed.contains(Constants.Register.R0))
         assertTrue(afterJumpNode.registersUsed.contains(Constants.Register.R3))
         assertTrue(afterJumpNode.registersUsed.contains(Constants.Register.R0))
-        //TODO add intervals per block
+
         assertEquals(9, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.start)
         assertEquals(10, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R3)]!!.end)
         assertEquals(10, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
         assertEquals(10, afterJumpNode.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
 
+    }
+
+    /**
+     * A graph level interval calculates a liveliness range over an entire graph from
+     * start to finish.
+     */
+    @Test
+    fun `basic test of graph intervals`() {
+        val program = """
+            function f1
+              iwt r2 , #5
+              return
+            endfunction
+            
+            iwt r1 , #5 
+            stw ( r1 ) 
+            bra next
+            nop
+
+            iwt r1 , #5 
+            stw ( r1 )
+            
+            next:
+            iwt r1 , #5 
+            stw ( r1 ) 
+            
+            call f1
+            
+        """.trimMargin()
+
+        val file = (CA65Scanner().tokenize(program))
+        val symbolService = SymbolService()
+        symbolService.extractDefinitions(file)
+        file.uri = URI.create("./test.sgs")
+        val fileService = MockFileService(file)
+        val codeGraph = CA65Grapher(symbolService = symbolService, fileService = fileService).graph(file = file, line = 5)
+        //assertEquals(1, codeGraph.)
+
+        val main = codeGraph.start()
+        val function = codeGraph.getFunction("f1")!!.functionBody.startNode
+
+        val mainInterval = main.intervals(IntervalKey.RegisterKey(Constants.Register.R1))
+        val functionInterval = function.intervals(IntervalKey.RegisterKey(Constants.Register.R2))
+
+
+        assertEquals(5,mainInterval?.start)
+        assertEquals(15,mainInterval?.end)
+
+        assertEquals(1, functionInterval?.start)
+        assertEquals(1,functionInterval?.end)
+
+
+        //TODO("Implement")
     }
 
     @Test

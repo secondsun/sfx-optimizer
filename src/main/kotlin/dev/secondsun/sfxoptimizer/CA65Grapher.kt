@@ -30,12 +30,17 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         val mainNode = makeNode(file,line);
         val start = CodeNode.Start(mainNode)
         val programGraph = CodeGraph(start)
-
+        programGraph.traverse({node ->
+            when(node) {
+                is CodeNode.FunctionStart -> programGraph.addFunction(node.functionName, node)
+                else -> {}
+            }
+        })
 
         return programGraph
     }
 
-    fun graphFunction(functionName : String): CodeNode.FunctionStart {
+    private fun graphFunction(functionName : String): CodeNode.FunctionStart {
         val location = symbolService.getLocation(functionName)
 
         val functionBody = graph(fileService.readLines(location.filename), location.line+1)
@@ -132,7 +137,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     break;
                 } else if (isCall(tokens)) {
                     val functionNode = graphFunction(tokens.tokens[1].text().trim());
-                    val callBlock = CodeNode.CallBlock(functionNode)
+                    val callBlock = CodeNode.CallBlock(functionNode, tokens.tokens[0].lineNumber)
                     code.addExit(callBlock)
                     callBlock.addEntrance(code)
 

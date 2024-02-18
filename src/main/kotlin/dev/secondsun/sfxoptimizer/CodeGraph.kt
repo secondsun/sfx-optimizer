@@ -2,6 +2,7 @@ package dev.secondsun.sfxoptimizer
 
 class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode.End) {
 
+    private val functions: MutableMap<String, CodeNode.FunctionStart> = mutableMapOf()
     private var _nodeCount = 0
     val nodeCount get() = _nodeCount
     init {
@@ -11,9 +12,7 @@ class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode
 
 
     fun traverse(visitor: CodeNodeVisitor, visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.startNode) {
-        node.accept(visitor)
-        visited.add(node)
-        node.exits.forEach { traverse(visitor, visited, it) }
+        start().traverse(visitor,visited, node)
     }
 
     private fun countChildren(node : CodeNode, visited : MutableSet<CodeNode> = mutableSetOf()) :Int {
@@ -28,6 +27,7 @@ class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode
                 is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
                 is CodeNode.CodeBlock, is CodeNode.CallBlock -> countChildren(exitNode, visited)
                 is CodeNode.End -> {}
+                is CodeNode.FunctionStart -> {}
             }
         }
         return visited.size
@@ -52,6 +52,7 @@ class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode
                 is CodeNode.CodeBlock -> builder.appendLine(print(exitNode, visited, indent + "\t"))
                 is CodeNode.End -> {}
                 is CodeNode.CallBlock -> builder.appendLine("Call ${exitNode.function.functionName}")
+                is CodeNode.FunctionStart -> {}
             }
         }
         builder.appendLine("---- Node end ---")
@@ -68,6 +69,17 @@ class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode
 
     fun end(): CodeNode.End {
         return end
+    }
+
+    /**
+     * Returns a function if it exists or null
+     */
+    fun getFunction(functionName: String): CodeNode.FunctionStart? {
+        return functions[functionName]
+    }
+
+    fun addFunction(functionName: String, node: CodeNode.FunctionStart) {
+        functions[functionName] = node
     }
 
 }

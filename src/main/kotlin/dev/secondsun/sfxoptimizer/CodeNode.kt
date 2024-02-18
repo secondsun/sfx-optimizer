@@ -44,7 +44,66 @@ sealed class CodeNode {
 
     val attributes = mutableSetOf<Attribute>()
 
-    data class Start(val main: CodeNode.CodeBlock) : CodeNode() {
+    data class Start(val main: CodeBlock) : CodeNode() {
+
+        fun intervals(key:IntervalKey):Interval? {
+                var min = Int.MAX_VALUE
+                var max = Int.MIN_VALUE
+
+                traverse(
+                    {
+                        when(it) {
+                            is CodeBlock -> {
+                                val interval = it.intervals[key]
+                                if (interval != null) {
+                                    if (interval.start < min) {
+                                        min = interval.start
+                                    }
+                                    if (interval.end > max) {
+                                        max = interval.end
+                                    }
+                                }
+                            }
+                            is CallBlock -> {
+                                val interval = it.function.functionBody.start().intervals(key)
+                                if (interval!= null) {
+                                    if (it.line >max) {
+                                        max = it.line
+                                    }
+                                    if (it.line<min) {
+                                        min = it.line
+                                    }
+                                }
+
+                            }
+                            else -> {}
+                        }
+                    }
+                )
+
+            if (min == Int.MAX_VALUE) {
+                return null
+            } else {
+                return Interval(key).apply { start = min; end = max }
+            }
+
+        }
+
+        fun traverse(visitor: CodeNodeVisitor, visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.main) {
+            if (visited.contains(node)) {
+                return
+            }
+
+            node.accept(visitor)
+            visited.add(node)
+            node.exits.forEach { traverse(visitor, visited, it) }
+            if (node is CodeNode.CallBlock) {
+                traverse(visitor,visited,node.function)
+            } else if (node is CodeNode.Start) {
+                traverse(visitor,visited,node.main)
+            }
+        }
+
         fun mainMethod(): CodeNode.CodeBlock {
             return main
         }
@@ -156,12 +215,13 @@ sealed class CodeNode {
 
     }
 
-    data class CallBlock(val function: CodeNode.FunctionStart) : CodeNode() {
+    data class CallBlock(val function: CodeNode.FunctionStart,val line :Int) : CodeNode() {
 
 
     }
 
-    data class FunctionStart(val functionName: String, val location: Location, val functionBody: CodeGraph) {
+    data class FunctionStart(val functionName: String, val location: Location, val functionBody: CodeGraph) :
+        CodeNode() {
 
     }
 }
