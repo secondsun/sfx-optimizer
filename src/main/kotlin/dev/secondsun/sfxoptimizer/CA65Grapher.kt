@@ -6,7 +6,8 @@ import dev.secondsun.retro.util.instruction.Instructions
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens
 import java.net.URI
-
+import kotlin.collections.MutableSet
+import kotlin.collections.MutableSet as MutableSet1
 
 
 typealias FileName = URI
@@ -53,7 +54,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
      * steps though a @param file starting at @param line.
      * You may provide an initial block with @param code
      */
-    private fun makeNode(file: TokenizedFile, line: Int, code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0))): CodeNode.CodeBlock {
+    private fun makeNode(file: TokenizedFile, line: Int, code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0)), registerLabels: MutableSet<String> = mutableSetOf<String>()): CodeNode.CodeBlock {
 
         for (idx in line..<file.textLines()) {
             if (visitedMap[Pair(file.uri, idx)] != null) { //Have we jumped/stepped into an existing block?
@@ -147,9 +148,10 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     nextBlock.addEntrance(callBlock)
                     break;
                 } else { // Not a jump, handle register and variable intervals
+                    applyAttributes(tokens, registerLabels)
                     val firstToken = tokens[0]
                     if (GSUInstruction.isInstruction(firstToken)) {
-                        val instruction = Instructions.values().find { it.instruction.matches(tokens) }
+                        val instruction = Instructions.entries.find { it.instruction.matches(tokens) }
                         if (instruction != null) {
                             when(instruction){
                                 Instructions.FROM -> {sReg = (tokens[1])}
@@ -262,6 +264,12 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
             }
         }
         return code
+    }
+
+    private fun applyAttributes(tokens: Tokens, registerLabels: MutableSet<String>) {
+        if (tokens[0].type == TokenType.TOK_REGISTER_KEYWORD) {
+            TODO("Handle Register labels")
+        }
     }
 
     private fun isCall(tokens: Tokens): Boolean {

@@ -2,11 +2,9 @@ import dev.secondsun.retro.util.CA65Scanner
 import dev.secondsun.retro.util.FileService
 import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.vo.TokenizedFile
-import dev.secondsun.sfxoptimizer.CA65Grapher
-import dev.secondsun.sfxoptimizer.CodeNode
-import dev.secondsun.sfxoptimizer.Constants
-import dev.secondsun.sfxoptimizer.IntervalKey
+import dev.secondsun.sfxoptimizer.*
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import java.net.URI
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -34,8 +32,7 @@ class CodeBlockTests {
             stw ( r1 ) 
         """.trimIndent()
 
-        val file = (CA65Scanner().tokenize(program))
-        val codeGraph = CA65Grapher().graph(file = file, line = 0)
+        val codeGraph = graph(program)
         assertEquals(3, codeGraph.nodeCount);
         assertTrue(codeGraph.start() is CodeNode.Start);
 
@@ -49,27 +46,21 @@ class CodeBlockTests {
     fun `function blocks`() {
         val program = """
             function somename 
-                var output
+                register output
                 from variable1
                 to output
                 add  #$5
                 return  
             endfunction
             
-            var input, output
+            register input, output
             iwt input, #5
             call somename 
             stop
             
         """.trimMargin()
 
-        val file = (CA65Scanner().tokenize(program))
-        file.uri = URI.create("./test.sgs")
-        val fileService = MockFileService(file)
-
-        val symbolService = SymbolService()
-        symbolService.extractDefinitions(file)
-        val programGraph = CA65Grapher(symbolService,fileService).graph(file = file, line = 8)
+        val programGraph = graph(program, 8)
         val mainCodeGraph = programGraph
 
         assertEquals(5, mainCodeGraph.nodeCount) //Call nodes get their own node
@@ -77,6 +68,25 @@ class CodeBlockTests {
         var functionNode = programGraph.getFunction("somename")
         assertNotNull(functionNode)
         assertEquals(3, functionNode!!.functionBody.nodeCount)
+
+
+    }
+
+    @Test
+    fun `test label interval`() {
+        val program = """
+            register input 
+            
+            iwt input, #$5
+            stw (input)
+        """.trimMargin()
+
+        val codeGraph = graph(program)
+
+        val intervalKey = IntervalKey.LabelKey("input")
+        val labelInterval = codeGraph.start().intervals(intervalKey)
+        assertEquals(2, labelInterval!!.start)
+        assertEquals(3, labelInterval!!.end)
 
 
     }
@@ -92,10 +102,7 @@ class CodeBlockTests {
                
                stop
                """.trimMargin()
-        val file = (CA65Scanner().tokenize(program))
-        val symbolService = SymbolService()
-        symbolService.extractDefinitions(file)
-        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
+        val codeGraph = graph(program)
 
         println(codeGraph.print())
 
@@ -131,11 +138,7 @@ class CodeBlockTests {
                stop ; comment -
         """.trimIndent()
 
-        val file = (CA65Scanner().tokenize(program))
-        val symbolService = SymbolService()
-        symbolService.extractDefinitions(file)
-        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
-
+        val codeGraph  = graph(program)
         println(codeGraph.print())
 
         assertEquals(7, codeGraph.nodeCount);
@@ -186,10 +189,7 @@ class CodeBlockTests {
             stw ( r3 ) 
         """.trimMargin()
 
-        val file = (CA65Scanner().tokenize(program))
-        val symbolService = SymbolService()
-        symbolService.extractDefinitions(file)
-        val codeGraph = CA65Grapher(symbolService).graph(file = file, line = 0)
+        val codeGraph = graph(program)
         //println(codeGraph.print())
         assertEquals(4, codeGraph.nodeCount);
 
@@ -222,7 +222,7 @@ class CodeBlockTests {
      * start to finish.
      */
     @Test
-    fun `basic test of graph intervals`() {
+    fun `basic test of graph register intervals`() {
         val program = """
             function f1
               iwt r2 , #5
@@ -245,13 +245,7 @@ class CodeBlockTests {
             
         """.trimMargin()
 
-        val file = (CA65Scanner().tokenize(program))
-        val symbolService = SymbolService()
-        symbolService.extractDefinitions(file)
-        file.uri = URI.create("./test.sgs")
-        val fileService = MockFileService(file)
-        val codeGraph = CA65Grapher(symbolService = symbolService, fileService = fileService).graph(file = file, line = 5)
-        //assertEquals(1, codeGraph.)
+        val codeGraph = graph(program, 5)//assertEquals(1, codeGraph.)
 
         val main = codeGraph.start()
         val function = codeGraph.getFunction("f1")!!.functionBody.startNode
@@ -270,6 +264,16 @@ class CodeBlockTests {
         //TODO("Implement")
     }
 
+    private fun graph(program: String, main: Int = 0): CodeGraph {
+        val file = (CA65Scanner().tokenize(program))
+        val symbolService = SymbolService()
+        symbolService.extractDefinitions(file)
+        file.uri = URI.create("./test.sgs")
+        val fileService = MockFileService(file)
+        return  CA65Grapher(symbolService = symbolService, fileService = fileService).graph(file = file, line = main)
+
+    }
+
     @Test
     fun `handle sreg and dreg`() {
         val program = """
@@ -280,12 +284,7 @@ class CodeBlockTests {
             asr
             asr
         """.trimMargin()
-        val file = (CA65Scanner().tokenize(program))
-        file.uri = URI.create("./file.sgs")
-        val fileService = MockFileService(file)
-        val symbolService = SymbolService()
-        symbolService.extractDefinitions(file)
-        val codeGraph = CA65Grapher(symbolService, fileService).graph(file = file, line = 0)
+        val codeGraph = graph(program)
         val block = codeGraph.start().main
 
 

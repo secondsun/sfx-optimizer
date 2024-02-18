@@ -32,7 +32,7 @@ function param
 endfunction
 
 Main : 
-  var input, output
+  register input, output
   iwt input, #5
   call output = myFuction param
   with output
@@ -43,7 +43,7 @@ Main :
 This will generate the ca65 code
 
 ```
-
+    
 function 
   to r3
   add r3
@@ -61,7 +61,7 @@ Main :
 
 
 # Pseudo-Macros
- * var - declare a variable 
+ * register - declare a register label 
  * function (#param )* - declare a function with parameters
  * return param - returns the value of param
  * call function (#var)* - call a function using declared vars

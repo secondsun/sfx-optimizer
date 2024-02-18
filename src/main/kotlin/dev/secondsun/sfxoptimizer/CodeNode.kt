@@ -138,7 +138,10 @@ sealed class CodeNode {
                  }
 
              } else {
-                 TODO("Add Label interval")
+                 val key = IntervalKey.LabelKey(token.text())
+                 val interval = _intervals[key]?: Interval(key)
+                 interval.addWrite(token.lineNumber)
+                 _intervals.put(key, interval)
              }
 
         }
@@ -165,7 +168,10 @@ sealed class CodeNode {
                 }
 
             } else {
-                TODO("Add Label interval")
+                val key = IntervalKey.LabelKey(token.text())
+                val interval = _intervals[key]?: Interval(key)
+                interval.addRead(token.lineNumber)
+                _intervals.put(key, interval)
             }
         }
 

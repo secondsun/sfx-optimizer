@@ -9,7 +9,7 @@ class RegisterAllocationTest {
      * This test tests a trivial register allocation.
      *
      * For example,
-     *   var example
+     *   register example
      *   iwt example, #5
      *   stw (example)
      * should create the code
@@ -19,7 +19,7 @@ class RegisterAllocationTest {
     @Test
     fun `trivial register selection with one variable`() {
         val code = """
-            var example
+            register example
             iwt example, #5
             stw(example)
         """.trimIndent()
@@ -39,7 +39,7 @@ class RegisterAllocationTest {
     @Test
     fun `trivial register selection with two variables`() {
         val code = """
-            var example, example2
+            register example, example2
             iwt example, #5
             iwt example2, #15
             stw(example)
@@ -68,7 +68,7 @@ class RegisterAllocationTest {
      *    return
      *  endfunction
      *
-     *  var newParam
+     *  register newParam
      *  iwt myParam, #42
      *  call myFunc newParam
      * ```
