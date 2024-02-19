@@ -7,7 +7,6 @@ import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens
 import java.net.URI
 import kotlin.collections.MutableSet
-import kotlin.collections.MutableSet as MutableSet1
 
 
 typealias FileName = URI
@@ -91,7 +90,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     code.addExit(newNode)
                     newNode.addLine(tokens)
                     visitedMap[Pair(file.uri, idx)] = newNode
-                    makeNode(file, idx+1, newNode)
+                    makeNode(file, idx+1, newNode, registerLabels)
                     return code
                 } else if (isUnconditionalJump(tokens)) {
                     code.addLine(tokens)
@@ -105,7 +104,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                         //import next token
                         //create exits
                         val destinationLocation = symbolService.getLocation(dest.text())
-                        val nextBlock = makeNode(file, destinationLocation.line )
+                        val nextBlock = makeNode(file, destinationLocation.line, registerLabels =  registerLabels )
 
                         code.addExit(nextBlock)
                         nextBlock.addEntrance(code)
@@ -121,13 +120,13 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     //import next token
                     //create exits
                     var destinationLocation = symbolService.getLocation(dest.text())
-                    var nextBlock = makeNode(file, destinationLocation.line)
+                    var nextBlock = makeNode(file, destinationLocation.line, registerLabels =  registerLabels )
 
                     code.addExit(nextBlock)
                     nextBlock.addEntrance(code)
 
                     //don't take the branch
-                    nextBlock = makeNode(file, idx + 2)
+                    nextBlock = makeNode(file, idx + 2, registerLabels =  registerLabels )
 
                     code.addExit(nextBlock)
                     nextBlock.addEntrance(code)
@@ -142,15 +141,18 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     code.addExit(callBlock)
                     callBlock.addEntrance(code)
 
-                    val nextBlock = makeNode(file, idx + 1)
+                    val nextBlock = makeNode(file, idx + 1, registerLabels =  registerLabels )
 
                     callBlock.addExit(nextBlock)
                     nextBlock.addEntrance(callBlock)
                     break;
+                } else if (isRegisterVariableDeclaration(tokens)) {
+                    handleRegisterVariableDeclaration(tokens, registerLabels)
+                    code.addLine(tokens)
                 } else { // Not a jump, handle register and variable intervals
-                    applyAttributes(tokens, registerLabels)
                     val firstToken = tokens[0]
                     if (GSUInstruction.isInstruction(firstToken)) {
+                        checkAndApplyRegisterLabelAttribute(tokens, registerLabels);
                         val instruction = Instructions.entries.find { it.instruction.matches(tokens) }
                         if (instruction != null) {
                             when(instruction){
@@ -266,9 +268,29 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return code
     }
 
-    private fun applyAttributes(tokens: Tokens, registerLabels: MutableSet<String>) {
+    private fun checkAndApplyRegisterLabelAttribute(tokens: Tokens, registerLabels: MutableSet<String>) {
+        tokens.tokens.forEach {
+            if (registerLabels.contains(it.text())) {
+                it.addAttribute(TokenAttribute.REGISTER_LABEL)
+            }
+        }
+    }
+
+    private fun isRegisterVariableDeclaration(tokens: Tokens): Boolean {
+        return tokens[0].type == TokenType.TOK_REGISTER_KEYWORD;
+    }
+
+    private fun handleRegisterVariableDeclaration(tokens: Tokens, registerLabels: MutableSet<String>) {
         if (tokens[0].type == TokenType.TOK_REGISTER_KEYWORD) {
-            TODO("Handle Register labels")
+            tokens.tokens.forEach {
+                if (it.type == TokenType.TOK_IDENT) {
+                    registerLabels.add(it.text())
+                    it.addAttribute(TokenAttribute.REGISTER_LABEL)
+                } else if (it.type == TokenType.TOK_COMMA) {}
+                else {
+                    it.addAttribute(TokenAttribute.ERROR)
+                }
+            }
         }
     }
 

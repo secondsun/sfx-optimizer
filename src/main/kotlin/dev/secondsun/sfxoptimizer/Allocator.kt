@@ -45,7 +45,7 @@ fun allocate(program:TokenizedFile):String {
         }
 
         val firstToken = line.tokens[0]
-        if (firstToken.text().equals("var")) {
+        if (firstToken.text().equals("register")) {
             for (tokenIndex in 1..<line.tokens.size) {
                 val token = line.tokens[tokenIndex]
                 if (token.type == TokenType.TOK_IDENT) {

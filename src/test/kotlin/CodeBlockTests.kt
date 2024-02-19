@@ -1,6 +1,7 @@
 import dev.secondsun.retro.util.CA65Scanner
 import dev.secondsun.retro.util.FileService
 import dev.secondsun.retro.util.SymbolService
+import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.sfxoptimizer.*
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -8,7 +9,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import java.net.URI
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * These tests test that code blocks are generated correctly.
@@ -62,12 +62,18 @@ class CodeBlockTests {
 
         val programGraph = graph(program, 8)
         val mainCodeGraph = programGraph
-
-        assertEquals(5, mainCodeGraph.nodeCount) //Call nodes get their own node
-
         var functionNode = programGraph.getFunction("somename")
+        val inputInterval = mainCodeGraph.startNode.intervals(IntervalKey.LabelKey("input"))
+
+
+        assertTrue(functionNode!!.functionBody.start().mainMethod().lines[1].tokens[0].hasAttribute(TokenAttribute.ERROR))
+        assertEquals(5, mainCodeGraph.nodeCount) //Call nodes get their own node
         assertNotNull(functionNode)
         assertEquals(3, functionNode!!.functionBody.nodeCount)
+
+
+        assertEquals(9,inputInterval!!.start)
+        assertEquals(9,inputInterval.end)
 
 
     }
@@ -245,6 +251,53 @@ class CodeBlockTests {
             
         """.trimMargin()
 
+        /**
+         * A graph level interval calculates a liveliness range over an entire graph from
+         * start to finish.
+         */
+        @Test
+        fun `basic test of graph label intervals`() {
+            val program = """
+            function f1
+              iwt r2 , #5
+              return
+            endfunction
+            
+            register test
+            
+            iwt test , #5 
+            stw ( test ) 
+            bra next
+            nop
+
+            iwt test , #5 
+            stw ( test )
+            
+            next:
+            iwt test , #5 
+            stw ( test ) 
+            
+            call f1
+            
+        """.trimMargin()
+
+            val codeGraph = graph(program, 5)//assertEquals(1, codeGraph.)
+
+            val main = codeGraph.start()
+            val function = codeGraph.getFunction("f1")!!.functionBody.startNode
+
+            val mainInterval = main.intervals(IntervalKey.LabelKey("test"))
+            val functionInterval = function.intervals(IntervalKey.RegisterKey(Constants.Register.R2))
+
+
+            assertEquals(5,mainInterval?.start)
+            assertEquals(15,mainInterval?.end)
+
+            assertEquals(1, functionInterval?.start)
+            assertEquals(1,functionInterval?.end)
+        }
+
+
         val codeGraph = graph(program, 5)//assertEquals(1, codeGraph.)
 
         val main = codeGraph.start()
@@ -259,18 +312,15 @@ class CodeBlockTests {
 
         assertEquals(1, functionInterval?.start)
         assertEquals(1,functionInterval?.end)
-
-
-        //TODO("Implement")
     }
 
-    private fun graph(program: String, main: Int = 0): CodeGraph {
+    private fun graph(program: String, mainStartLine: Int = 0): CodeGraph {
         val file = (CA65Scanner().tokenize(program))
         val symbolService = SymbolService()
         symbolService.extractDefinitions(file)
         file.uri = URI.create("./test.sgs")
         val fileService = MockFileService(file)
-        return  CA65Grapher(symbolService = symbolService, fileService = fileService).graph(file = file, line = main)
+        return  CA65Grapher(symbolService = symbolService, fileService = fileService).graph(file = file, line = mainStartLine)
 
     }
 
