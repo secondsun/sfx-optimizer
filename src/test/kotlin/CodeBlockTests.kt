@@ -65,7 +65,7 @@ class CodeBlockTests {
         var functionNode = programGraph.getFunction("somename")
         val inputInterval = mainCodeGraph.startNode.intervals(IntervalKey.LabelKey("input"))
 
-
+        //youre super pretty all the time <3
         assertTrue(functionNode!!.functionBody.start().mainMethod().lines[1].tokens[0].hasAttribute(TokenAttribute.ERROR))
         assertEquals(5, mainCodeGraph.nodeCount) //Call nodes get their own node
         assertNotNull(functionNode)
@@ -325,6 +325,24 @@ class CodeBlockTests {
     }
 
     @Test
+    fun `defining a variable creates register and label intervals`() {
+        val program = """
+            l1 = r1
+            iwt l1, #$12
+            stw ( l1 )
+        """.trimMargin()
+
+        val codeGraph = graph(program)
+        val block = codeGraph.start().main
+        assertEquals(1, block.intervals[IntervalKey.RegisterKey(Constants.Register.R1)]!!.start)
+        assertEquals(2, block.intervals[IntervalKey.RegisterKey(Constants.Register.R1)]!!.end)
+
+        assertEquals(1, block.intervals[IntervalKey.LabelKey("l1")]!!.start)
+        assertEquals(2, block.intervals[IntervalKey.LabelKey("l1")]!!.end)
+
+
+    }
+    @Test
     fun `handle sreg and dreg`() {
         val program = """
             iwt r5, #$7FFF
@@ -334,6 +352,7 @@ class CodeBlockTests {
             asr
             asr
         """.trimMargin()
+
         val codeGraph = graph(program)
         val block = codeGraph.start().main
 

@@ -53,7 +53,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
      * steps though a @param file starting at @param line.
      * You may provide an initial block with @param code
      */
-    private fun makeNode(file: TokenizedFile, line: Int, code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0)), registerLabels: MutableSet<String> = mutableSetOf<String>()): CodeNode.CodeBlock {
+    private fun makeNode(file: TokenizedFile, line: Int, code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0)), registerLabels: MutableSet<RegisterLabel> = mutableSetOf<RegisterLabel>()): CodeNode.CodeBlock {
 
         for (idx in line..<file.textLines()) {
             if (visitedMap[Pair(file.uri, idx)] != null) { //Have we jumped/stepped into an existing block?
@@ -146,7 +146,11 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     callBlock.addExit(nextBlock)
                     nextBlock.addEntrance(callBlock)
                     break;
-                } else if (isRegisterVariableDeclaration(tokens)) {
+                } else if (isRegisterVariableDeclaration(tokens)) {//register
+                    if (isRegisterVariableAssignment(tokens,registerLabels)) {//check for register $label = $register
+                        registerLabels.add(RegisterLabel(tokens.tokens[1].text(), Constants.Register.valueOf(tokens[3].text().toString().uppercase())))
+                        code.addLine(tokens)
+                    }//you so pretty
                     handleRegisterVariableDeclaration(tokens, registerLabels)
                     code.addLine(tokens)
                 } else { // Not a jump, handle register and variable intervals
@@ -268,9 +272,18 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return code
     }
 
-    private fun checkAndApplyRegisterLabelAttribute(tokens: Tokens, registerLabels: MutableSet<String>) {
+    private fun isRegisterVariableAssignment(tokens: Tokens, registerLabels: MutableSet<RegisterLabel>): Boolean {
+        if (tokens.tokens.size == 4 && tokens[0].text().equals("register") && tokens[2].type == TokenType.TOK_EQ) {
+            return true
+        } else {
+            return false
+        }
+    }
+
+
+    private fun checkAndApplyRegisterLabelAttribute(tokens: Tokens, registerLabels: MutableSet<RegisterLabel>) {
         tokens.tokens.forEach {
-            if (registerLabels.contains(it.text())) {
+            if (registerLabels.contains(RegisterLabel(it.text()))) {
                 it.addAttribute(TokenAttribute.REGISTER_LABEL)
             }
         }
@@ -280,11 +293,11 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return tokens[0].type == TokenType.TOK_REGISTER_KEYWORD;
     }
 
-    private fun handleRegisterVariableDeclaration(tokens: Tokens, registerLabels: MutableSet<String>) {
+    private fun handleRegisterVariableDeclaration(tokens: Tokens, registerLabels: MutableSet<RegisterLabel>) {
         if (tokens[0].type == TokenType.TOK_REGISTER_KEYWORD) {
             tokens.tokens.forEach {
                 if (it.type == TokenType.TOK_IDENT) {
-                    registerLabels.add(it.text())
+                    registerLabels.add(RegisterLabel(it.text()))
                     it.addAttribute(TokenAttribute.REGISTER_LABEL)
                 } else if (it.type == TokenType.TOK_COMMA) {}
                 else {
