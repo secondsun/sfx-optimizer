@@ -30,7 +30,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         val mainNode = makeNode(file,line);
         val start = CodeNode.Start(mainNode)
         val programGraph = CodeGraph(start)
-        programGraph.traverse({node ->
+        programGraph.traverse({ node ->
             when(node) {
                 is CodeNode.FunctionStart -> programGraph.addFunction(node.functionName, node)
                 else -> {}
@@ -43,13 +43,26 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     private fun graphFunction(functionName : String): CodeNode.FunctionStart {
         val location = symbolService.getLocation(functionName)
 
-        val functionBody = graph(fileService.readLines(location.filename), location.line+1)
-        val functionNode = CodeNode.FunctionStart(functionName, location, functionBody)
+        var lines = fileService.readLines(location.filename)
+
+        val functionLine  = lines.getLineTokens(0)
+        val params = functionLine.subList(2,functionLine.size)
+
+        val mainNode = makeNode(lines,location.line+1, registerLabels = params.map { RegisterLabel(it.text()) }.toMutableSet());
+        val start = CodeNode.Start(mainNode)
+        val functionBody = CodeGraph(start)
+        functionBody.traverse({ node ->
+            when(node) {
+                is CodeNode.FunctionStart -> functionBody.addFunction(node.functionName, node)
+                else -> {}
+            }
+        })
+
+        val functionNode = CodeNode.FunctionStart(functionName, location, functionBody, params)
         return functionNode;
     }
 
     /**
-     * Recursive
      * steps though a @param file starting at @param line.
      * You may provide an initial block with @param code
      */
@@ -137,7 +150,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     break;
                 } else if (isCall(tokens)) {
                     val functionNode = graphFunction(tokens.tokens[1].text().trim());
-                    val callBlock = CodeNode.CallBlock(functionNode, tokens.tokens[0].lineNumber)
+                    val callBlock = CodeNode.CallBlock(functionNode, tokens.tokens[0].lineNumber, tokens)
 
                     checkFunctionTypesMatchAndCreateIntervals(callBlock, functionNode, tokens)
 
@@ -285,6 +298,9 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                 callBlockTokens.tokens[0].addAttribute(TokenAttribute.ERROR)
                 callBlockTokens.tokens[0].message = "${functionNode.functionName} requires ${functionNode.params.size} parameters"
             }
+        } else {///handle params intervals
+            val params = callBlockTokens.tokens.subList(2,callBlockTokens.tokens.size)
+
         }
     }
 
@@ -329,6 +345,10 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     }
 
     private fun isCall(tokens: Tokens): Boolean {
+        if (tokens.tokens.size < 2 || !tokens.tokens[0].text().trim().lowercase().equals("call") ) {
+            return false
+        }
+
         val functionLocation = this.symbolService.getLocation(tokens[1].text())
 
         val isCall = tokens.tokens[0].text().trim().lowercase().equals("call") && (functionLocation != null)

@@ -52,10 +52,10 @@ sealed class CodeNode {
                 var max = Int.MIN_VALUE
 
                 traverse(
-                    {
-                        when(it) {
+                    { codeNode ->
+                        when(codeNode) {
                             is CodeBlock -> {
-                                val interval = it.intervals[key]
+                                val interval = codeNode.intervals[key]
                                 if (interval != null) {
                                     if (interval.start < min) {
                                         min = interval.start
@@ -66,13 +66,52 @@ sealed class CodeNode {
                                 }
                             }
                             is CallBlock -> {
-                                val interval = it.function.functionBody.start().intervals(key)
-                                if (interval!= null) {
-                                    if (it.line >max) {
-                                        max = it.line
-                                    }
-                                    if (it.line<min) {
-                                        min = it.line
+                                when(key) {
+                                  is IntervalKey.RegisterKey -> {
+
+                                      //add all registers used in function
+                                      val interval = codeNode.function.functionBody.start().intervals(key)
+                                      if (interval != null) {
+                                          if (codeNode.line > max) {
+                                              max = codeNode.line
+                                          }
+                                          if (codeNode.line < min) {
+                                              min = codeNode.line
+                                          }
+                                      }
+
+                                      //add all registers passed as params
+                                      if (codeNode.tokens.tokens.size >2) {
+                                          val params = codeNode.tokens.tokens.subList(2, codeNode.tokens.tokens.size)
+                                          params
+                                              .filter({param -> Constants.isRegister(param.text())})
+                                              .filter { param -> param.text().equals(key.register.label) }
+                                              .forEach({
+                                                  if (codeNode.line > max) {
+                                                      max = codeNode.line
+                                                  }
+                                                  if (codeNode.line < min) {
+                                                      min = codeNode.line
+                                                  }
+                                              })
+                                      }
+                                  }
+
+                                    is IntervalKey.LabelKey -> {
+                                        if (codeNode.tokens.tokens.size >2) {
+                                            val params = codeNode.tokens.tokens.subList(2, codeNode.tokens.tokens.size)
+                                            params
+                                                .filter({param -> Constants.isRegister(param.text())})
+                                                .filter { param -> param.text().equals(key.label) }
+                                                .forEach({
+                                                    if (codeNode.line > max) {
+                                                        max = codeNode.line
+                                                    }
+                                                    if (codeNode.line < min) {
+                                                        min = codeNode.line
+                                                    }
+                                                })
+                                        }
                                     }
                                 }
 
@@ -242,7 +281,7 @@ sealed class CodeNode {
 
     }
 
-    data class CallBlock(val function: CodeNode.FunctionStart,val line :Int) : CodeNode() {
+    data class CallBlock(val function: CodeNode.FunctionStart,val line :Int, val tokens:Tokens) : CodeNode() {
 
 
     }

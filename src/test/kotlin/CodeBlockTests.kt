@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import java.net.URI
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 /**
  * These tests test that code blocks are generated correctly.
@@ -34,7 +35,8 @@ class CodeBlockTests {
 
         val codeGraph = graph(program)
         assertEquals(3, codeGraph.nodeCount);
-        assertTrue(codeGraph.start() is CodeNode.Start);
+        assertTrue(codeGraph.start() is
+                CodeNode.Start);
 
         val codeNode: CodeNode.CodeBlock = codeGraph.start().mainMethod();
 
@@ -180,6 +182,43 @@ class CodeBlockTests {
     }
 
     @Test
+    fun `function errors`() {
+        val program = """
+            function test_funct_bad_param param 1
+              nop
+              return
+            endfunction
+            
+            function test_funct param1
+              nop
+              return
+            endfunction
+            
+            
+            register param1
+            call test_funct param1
+            call test_funct 
+            call test_funct param2
+            call test_funct_bad_param param1
+            """
+        val file = CA65Scanner().tokenize(program)
+        val codeGraph = CA65Grapher().graph(file, line = 11)
+        val main = codeGraph.start().main
+        val badFunction = codeGraph.getFunction("test_funct_bad_param")
+
+        main.lines[1].tokens.forEach({assertFalse(it.hasAttribute(TokenAttribute.ERROR))})
+
+        assertTrue(main.lines[2].tokens[1].hasAttribute(TokenAttribute.ERROR))
+        assertEquals("missing params", main.lines[2].tokens[1].message)
+        assertTrue(main.lines[3].tokens[1].hasAttribute(TokenAttribute.ERROR))
+        assertEquals("undeclared param", main.lines[3].tokens[2].message)
+
+        assertTrue(badFunction!!.params[1].hasAttribute(TokenAttribute.ERROR))
+        assertEquals("invalid param", badFunction!!.params[1].message)
+
+    }
+
+    @Test
     fun `does a trivial jump generate 4 code nodes`() {
         val program = """
             iwt r1 , #5 
@@ -228,6 +267,7 @@ class CodeBlockTests {
         val program = """
             function test_function param1
               iwt param1, #5
+              iwt r3, #6
               return
             endfunction
         
@@ -238,13 +278,21 @@ class CodeBlockTests {
         val function = codeGraph.getFunction("test_function")!!.functionBody.startNode
         val main = codeGraph.start()
 
-        val interval = main.intervals(IntervalKey.RegisterKey(Constants.Register.R2))
-        assertEquals(5, interval?.start)
-        assertEquals(5, interval?.end)
 
         val functionInterval = function.intervals(IntervalKey.LabelKey("param1"))
         assertEquals(1, functionInterval?.start)
         assertEquals(1, functionInterval?.end)
+
+        val functionInterval2 = function.intervals(IntervalKey.RegisterKey(Constants.Register.R3))
+        assertEquals(2, functionInterval2?.start)
+        assertEquals(2, functionInterval2?.end)
+
+        val interval = main.intervals(IntervalKey.RegisterKey(Constants.Register.R2))
+        assertEquals(6, interval?.start)
+        assertEquals(6, interval?.end)
+
+
+
     }
 
     /**
