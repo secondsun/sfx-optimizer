@@ -223,6 +223,30 @@ class CodeBlockTests {
 
     }
 
+    @Test
+    fun `function params are registerLabels`() {
+        val program = """
+            function test_function param1
+              iwt param1, #5
+              return
+            endfunction
+        
+            call test_function r2
+        """.trimMargin()
+
+        val codeGraph = graph(program, 5)
+        val function = codeGraph.getFunction("test_function")!!.functionBody.startNode
+        val main = codeGraph.start()
+
+        val interval = main.intervals(IntervalKey.RegisterKey(Constants.Register.R2))
+        assertEquals(5, interval?.start)
+        assertEquals(5, interval?.end)
+
+        val functionInterval = function.intervals(IntervalKey.LabelKey("param1"))
+        assertEquals(1, functionInterval?.start)
+        assertEquals(1, functionInterval?.end)
+    }
+
     /**
      * A graph level interval calculates a liveliness range over an entire graph from
      * start to finish.
@@ -320,14 +344,15 @@ class CodeBlockTests {
         symbolService.extractDefinitions(file)
         file.uri = URI.create("./test.sgs")
         val fileService = MockFileService(file)
-        return  CA65Grapher(symbolService = symbolService, fileService = fileService).graph(file = file, line = mainStartLine)
+        return  CA65Grapher(symbolService = symbolService, fileService = fileService)
+                    .graph(file = file, line = mainStartLine)
 
     }
 
     @Test
     fun `defining a variable creates register and label intervals`() {
         val program = """
-            l1 = r1
+            register l1 = r1
             iwt l1, #$12
             stw ( l1 )
         """.trimMargin()
@@ -339,8 +364,6 @@ class CodeBlockTests {
 
         assertEquals(1, block.intervals[IntervalKey.LabelKey("l1")]!!.start)
         assertEquals(2, block.intervals[IntervalKey.LabelKey("l1")]!!.end)
-
-
     }
     @Test
     fun `handle sreg and dreg`() {

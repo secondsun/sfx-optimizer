@@ -138,6 +138,9 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                 } else if (isCall(tokens)) {
                     val functionNode = graphFunction(tokens.tokens[1].text().trim());
                     val callBlock = CodeNode.CallBlock(functionNode, tokens.tokens[0].lineNumber)
+
+                    checkFunctionTypesMatchAndCreateIntervals(callBlock, functionNode, tokens)
+
                     code.addExit(callBlock)
                     callBlock.addEntrance(code)
 
@@ -272,6 +275,19 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return code
     }
 
+    private fun checkFunctionTypesMatchAndCreateIntervals(
+        callBlock: CodeNode.CallBlock,
+        functionNode: CodeNode.FunctionStart,
+        callBlockTokens: Tokens
+    ) {
+        if (callBlockTokens.tokens.size == 2) {
+            if (functionNode.params.size != 0) {
+                callBlockTokens.tokens[0].addAttribute(TokenAttribute.ERROR)
+                callBlockTokens.tokens[0].message = "${functionNode.functionName} requires ${functionNode.params.size} parameters"
+            }
+        }
+    }
+
     private fun isRegisterVariableAssignment(tokens: Tokens, registerLabels: MutableSet<RegisterLabel>): Boolean {
         if (tokens.tokens.size == 4 && tokens[0].text().equals("register") && tokens[2].type == TokenType.TOK_EQ) {
             return true
@@ -282,9 +298,14 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
 
 
     private fun checkAndApplyRegisterLabelAttribute(tokens: Tokens, registerLabels: MutableSet<RegisterLabel>) {
-        tokens.tokens.forEach {
-            if (registerLabels.contains(RegisterLabel(it.text()))) {
-                it.addAttribute(TokenAttribute.REGISTER_LABEL)
+        tokens.tokens.forEach {token ->
+            val label = token.text()
+            if (registerLabels.contains(RegisterLabel(label))) {
+                val rl = registerLabels.find { registerLabel -> registerLabel.label.equals(label) }
+                if (rl != null) {
+                    token.addAttribute(TokenAttribute.REGISTER_LABEL)
+                    token.addMetadata(TokenAttribute.REGISTER_LABEL, rl.register)
+                }
             }
         }
     }
@@ -308,8 +329,20 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     }
 
     private fun isCall(tokens: Tokens): Boolean {
-        return tokens.tokens.size == 2 && tokens.tokens[0].text().trim().lowercase().equals("call")
-    }
+        val functionLocation = this.symbolService.getLocation(tokens[1].text())
+
+        val isCall = tokens.tokens[0].text().trim().lowercase().equals("call") && (functionLocation != null)
+        if (isCall) {
+            return true
+        } else {
+            tokens[1].apply {
+                addAttribute(TokenAttribute.ERROR)
+                message = "${text()} is not a function name"
+            }
+            return false
+            }
+        }
+
 
     private fun isReturnOrEndFunction(tokens: Tokens): Boolean {
         val tokensList = tokens.tokens

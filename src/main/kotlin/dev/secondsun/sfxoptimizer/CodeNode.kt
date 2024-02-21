@@ -2,6 +2,7 @@ package dev.secondsun.sfxoptimizer
 
 import dev.secondsun.retro.util.Location
 import dev.secondsun.retro.util.Token
+import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.vo.Tokens
 
 sealed class CodeNode {
@@ -115,6 +116,8 @@ sealed class CodeNode {
 
     class CodeBlock(var loc : Location) : CodeNode() {
         private val _intervals = mutableMapOf<IntervalKey, Interval>()
+
+
         val intervals get() = _intervals.toMap()
 
         val registersUsed: List<Constants.Register> get() = (_intervals.keys.filter { it is IntervalKey.RegisterKey }.map { (it as IntervalKey.RegisterKey).register })
@@ -142,6 +145,15 @@ sealed class CodeNode {
                  val interval = _intervals[key]?: Interval(key)
                  interval.addWrite(token.lineNumber)
                  _intervals.put(key, interval)
+                 if (token.hasAttribute(TokenAttribute.REGISTER_LABEL)) {
+                     val register : Constants.Register? = token.getMetadata(TokenAttribute.REGISTER_LABEL);
+                     if (register != null) {
+                         val key = IntervalKey.RegisterKey(register)
+                         val interval = _intervals[key] ?: Interval(key)
+                         interval.addRead(token.lineNumber)
+                         _intervals.put(key, interval)
+                     }
+                 }
              }
 
         }
@@ -172,6 +184,15 @@ sealed class CodeNode {
                 val interval = _intervals[key]?: Interval(key)
                 interval.addRead(token.lineNumber)
                 _intervals.put(key, interval)
+                if (token.hasAttribute(TokenAttribute.REGISTER_LABEL)) {
+                    val register : Constants.Register? = token.getMetadata(TokenAttribute.REGISTER_LABEL);
+                    if (register != null) {
+                        val key = IntervalKey.RegisterKey(register)
+                        val interval = _intervals[key] ?: Interval(key)
+                        interval.addRead(token.lineNumber)
+                        _intervals.put(key, interval)
+                    }
+                }
             }
         }
 
@@ -226,8 +247,7 @@ sealed class CodeNode {
 
     }
 
-    data class FunctionStart(val functionName: String, val location: Location, val functionBody: CodeGraph) :
+    data class FunctionStart(val functionName: String, val location: Location, val functionBody: CodeGraph,val params: List<Token>) :
         CodeNode() {
-
     }
 }
