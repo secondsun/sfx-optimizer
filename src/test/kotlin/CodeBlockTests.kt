@@ -206,7 +206,7 @@ class CodeBlockTests {
         val main = codeGraph.start().main
         val badFunction = codeGraph.getFunction("test_funct_bad_param")
 
-        main.lines[1].tokens.forEach({assertFalse(it.hasAttribute(TokenAttribute.ERROR))})
+        main.lines[1].tokens.forEach({assertFalse(it.hasAttribute(TokenAttribute.ERROR), it.message)})
 
         assertTrue(main.lines[2].tokens[1].hasAttribute(TokenAttribute.ERROR))
         assertEquals("missing params", main.lines[2].tokens[1].message)
