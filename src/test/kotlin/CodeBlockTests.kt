@@ -201,17 +201,19 @@ class CodeBlockTests {
             call test_funct param2
             call test_funct_bad_param param1
             """
-        val file = CA65Scanner().tokenize(program)
-        val codeGraph = CA65Grapher().graph(file, line = 11)
+
+        val codeGraph = graph(program, 12)
         val main = codeGraph.start().main
         val badFunction = codeGraph.getFunction("test_funct_bad_param")
 
-        main.lines[1].tokens.forEach({assertFalse(it.hasAttribute(TokenAttribute.ERROR), it.message)})
-
-        assertTrue(main.lines[2].tokens[1].hasAttribute(TokenAttribute.ERROR))
-        assertEquals("missing params", main.lines[2].tokens[1].message)
-        assertTrue(main.lines[3].tokens[1].hasAttribute(TokenAttribute.ERROR))
-        assertEquals("undeclared param", main.lines[3].tokens[2].message)
+        main.lines[0].tokens.forEach({assertFalse(it.hasAttribute(TokenAttribute.ERROR), it.message)})
+        (main.exits[0] as CodeNode.CallBlock).tokens.tokens.forEach({assertFalse(it.hasAttribute(TokenAttribute.ERROR), it.message)})
+        val call1 = main.exits[0].exits[0].exits[0] as CodeNode.CallBlock
+        assertTrue(call1.tokens.tokens[0].hasAttribute(TokenAttribute.ERROR))
+        assertEquals("test_funct requires 1 parameters", call1.tokens.tokens[0].message)
+        val call2 = call1.exits[0].exits[0] as CodeNode.CallBlock
+        assertTrue(call2.tokens.tokens[0].hasAttribute(TokenAttribute.ERROR))
+        assertEquals("undeclared param", call2.tokens.tokens[2].message)
 
         assertTrue(badFunction!!.params[1].hasAttribute(TokenAttribute.ERROR))
         assertEquals("invalid param", badFunction!!.params[1].message)

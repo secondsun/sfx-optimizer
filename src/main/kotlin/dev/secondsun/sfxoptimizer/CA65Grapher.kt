@@ -45,7 +45,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
 
         var lines = fileService.readLines(location.filename)
 
-        val functionLine  = lines.getLineTokens(0)
+        val functionLine  = lines.getLineTokens(location.line)
         val params = functionLine.subList(2,functionLine.size)
 
         val mainNode = makeNode(lines,location.line+1, registerLabels = params.map { RegisterLabel(it.text()) }.toMutableSet());
@@ -153,7 +153,6 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     val callBlock = CodeNode.CallBlock(functionNode, tokens.tokens[0].lineNumber, tokens)
 
                     checkFunctionTypesMatchAndCreateIntervals(callBlock, functionNode, tokens)
-
                     code.addExit(callBlock)
                     callBlock.addEntrance(code)
 
@@ -337,6 +336,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     registerLabels.add(RegisterLabel(it.text()))
                     it.addAttribute(TokenAttribute.REGISTER_LABEL)
                 } else if (it.type == TokenType.TOK_COMMA) {}
+                else if (tokens[0].type == TokenType.TOK_REGISTER_KEYWORD) {}
                 else {
                     it.addAttribute(TokenAttribute.ERROR)
                 }
