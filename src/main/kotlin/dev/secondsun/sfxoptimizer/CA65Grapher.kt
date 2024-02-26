@@ -2,16 +2,18 @@ package dev.secondsun.sfxoptimizer
 
 import dev.secondsun.retro.util.*
 import dev.secondsun.retro.util.instruction.GSUInstruction
-import dev.secondsun.retro.util.instruction.Instructions
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens
 import java.net.URI
 import kotlin.collections.MutableSet
-
+import dev.secondsun.retro.util.instruction.Instructions
 
 typealias FileName = URI
 typealias LineNumber = Int
+private enum class StepInType {NoBlock, StepToStartBlock, JumpToStartBlock, MidBlock}
 class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileService: FileService = FileService()) {
+
+
 
     private var sReg: Token? = null
     private var dReg: Token? = null
@@ -19,11 +21,11 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     val visitedMap = mutableMapOf<Pair<FileName, LineNumber>, CodeNode.CodeBlock>()
 
     private fun isConditionalJump(tokens: Tokens): Boolean {
-        return GSUInstruction.conditionalJumpInstructions.stream().anyMatch { it.matches(tokens) };
+        return Instructions.conditionalJumpInstructions.stream().anyMatch { it.matches(tokens) };
     }
 
     private fun isUnconditionalJump(tokens: Tokens): Boolean {
-        return GSUInstruction.unconditionalJumpInstructions.stream().anyMatch { it.matches(tokens) };
+        return Instructions.unconditionalJumpInstructions.stream().anyMatch { it.matches(tokens) };
     }
 
     fun graph(file: TokenizedFile, line: Int): CodeGraph {
@@ -47,7 +49,10 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
 
         val functionLine  = lines.getLineTokens(location.line)
         val params = functionLine.subList(2,functionLine.size)
-
+        params.forEach({param -> if (param.type != TokenType.TOK_IDENT){
+            param.addAttribute(TokenAttribute.ERROR)
+            param.message = "invalid param"
+        } })
         val mainNode = makeNode(lines,location.line+1, registerLabels = params.map { RegisterLabel(it.text()) }.toMutableSet());
         val start = CodeNode.Start(mainNode)
         val functionBody = CodeGraph(start)
@@ -69,16 +74,23 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     private fun makeNode(file: TokenizedFile, line: Int, code : CodeNode.CodeBlock = CodeNode.CodeBlock(Location(file.uri(), line,0,0)), registerLabels: MutableSet<RegisterLabel> = mutableSetOf<RegisterLabel>()): CodeNode.CodeBlock {
 
         for (idx in line..<file.textLines()) {
-            if (visitedMap[Pair(file.uri, idx)] != null) { //Have we jumped/stepped into an existing block?
-                val nextBlock = visitedMap[Pair(file.uri, idx)]!!
 
-                if (nextBlock.loc.line == idx && line == idx) {//we jumped to the start of a block, no split needed
-                    return nextBlock
-                } else if (nextBlock.loc.line == idx ) { //we stepped into an existing block. create exits and return
+            //Check to make sure we haven't stepped/jumped into an existing block
+            val stepInType:StepInType = getStepInType(file,idx,line)
+
+            when(stepInType) {
+
+                StepInType.StepToStartBlock -> {
+                    val nextBlock = visitedMap[Pair(file.uri, idx)]!!
                     code.addExit(nextBlock)
                     nextBlock.addEntrance(code)
                     return code
-                } else { //We jumped into the middle of a block. We must split it and rearrange old entrances and exits
+                }
+                StepInType.JumpToStartBlock -> {
+                    return visitedMap[Pair(file.uri, idx)]!!
+                }
+                StepInType.MidBlock -> {
+                    val nextBlock = visitedMap[Pair(file.uri, idx)]!!
                     val splitBlocks : Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> = nextBlock.split(idx)
 
                     val block2 = splitBlocks.second
@@ -89,10 +101,13 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     }
                     return block2
                 }
-
-            } else { //This is a new line in the code block.
-                visitedMap[Pair(file.uri, idx)] = code
+                StepInType.NoBlock -> {
+                    //Continue as normal
+                }
             }
+
+            visitedMap[Pair(file.uri, idx)] = code
+
             val tokens = file.getLine(idx)
             if (tokens != null ) {
 
@@ -144,6 +159,10 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     code.addExit(nextBlock)
                     nextBlock.addEntrance(code)
                     break;
+                } else if (isForLoop(tokens)) {
+                    TODO()
+                } else if (isEndFor(tokens)) {
+                    TODO()
                 } else if (isReturnOrEndFunction(tokens)) {//handle return
                     code.addLine(tokens)
                     code.addExit(CodeNode.End)
@@ -152,7 +171,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     val functionNode = graphFunction(tokens.tokens[1].text().trim());
                     val callBlock = CodeNode.CallBlock(functionNode, tokens.tokens[0].lineNumber, tokens)
 
-                    checkFunctionTypesMatchAndCreateIntervals(callBlock, functionNode, tokens)
+                    checkFunctionTypesMatchAndCreateIntervals(callBlock, functionNode, tokens, registerLabels)
                     code.addExit(callBlock)
                     callBlock.addEntrance(code)
 
@@ -287,10 +306,85 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return code
     }
 
+    private fun isEndFor(tokens: Tokens): Boolean {
+        val firstToken = tokens[0]
+        if (firstToken.text().lowercase().equals("endfor")) {
+            //error checking
+            if (tokens.tokens.size != 1) {
+                firstToken.message = "End for takes no params"
+                firstToken.addAttribute(TokenAttribute.ERROR)
+                return false
+            } else {
+                val secondToken = tokens[1]
+                if (secondToken.type != TokenType.TOK_INTCON) {
+                    secondToken.message = "For loops require an int"
+                    secondToken.addAttribute(TokenAttribute.ERROR)
+                    return false
+                }
+            }
+
+            return true;
+        }
+        return false;
+    }
+
+    private fun isForLoop(tokens: Tokens): Boolean {
+        val firstToken = tokens[0]
+        if (firstToken.text().lowercase().equals("for")) {
+            //error checking
+            if (tokens.tokens.size != 2) {
+                firstToken.message = "For loops have only one parameter"
+                firstToken.addAttribute(TokenAttribute.ERROR)
+                return false
+            } else {
+                val secondToken = tokens[1]
+                if (secondToken.type != TokenType.TOK_INTCON) {
+                    secondToken.message = "For loops require an int"
+                    secondToken.addAttribute(TokenAttribute.ERROR)
+                    return false
+                }
+            }
+
+            return true;
+        } else if (firstToken.text().lowercase().equals("forR")) {
+            if (tokens.tokens.size != 2) {
+                firstToken.message = "For loops have only one parameter"
+                firstToken.addAttribute(TokenAttribute.ERROR)
+                return false
+            } else {
+                val secondToken = tokens[1]
+                if (secondToken.type != TokenType.TOK_REGISTER) {
+                    secondToken.message = "ForR loops require an register"
+                    secondToken.addAttribute(TokenAttribute.ERROR)
+                    return false
+                }
+            }
+        }
+        return false
+    }
+
+    private fun getStepInType(file: TokenizedFile, idx:Int, line:Int): StepInType {
+        if (visitedMap[Pair(file.uri, idx)] != null) { //Have we jumped/stepped into an existing block?
+            val nextBlock = visitedMap[Pair(file.uri, idx)]!!
+
+            return if (nextBlock.loc.line == idx && line == idx) {//we jumped to the start of a block, no split needed
+                StepInType.JumpToStartBlock
+            } else if (nextBlock.loc.line == idx ) { //we stepped into an existing block. create exits and return
+                StepInType.StepToStartBlock
+            } else { //We jumped into the middle of a block. We must split it and rearrange old entrances and exits
+                StepInType.MidBlock
+            }
+
+        } else { //This is a new line in the code block.
+            return StepInType.NoBlock
+        }
+    }
+
     private fun checkFunctionTypesMatchAndCreateIntervals(
         callBlock: CodeNode.CallBlock,
         functionNode: CodeNode.FunctionStart,
-        callBlockTokens: Tokens
+        callBlockTokens: Tokens,
+        registerLabels: MutableSet<RegisterLabel>
     ) {
         if (callBlockTokens.tokens.size == 2) {
             if (functionNode.params.size != 0) {
@@ -299,7 +393,13 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
             }
         } else {///handle params intervals
             val params = callBlockTokens.tokens.subList(2,callBlockTokens.tokens.size)
-
+            params.forEach(
+                {param ->
+                    if (!registerLabels.contains(RegisterLabel(param.text()))) {
+                        param.addAttribute(TokenAttribute.ERROR)
+                        param.message = "undeclared param"
+                    }
+                })
         }
     }
 

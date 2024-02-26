@@ -101,7 +101,6 @@ sealed class CodeNode {
                                         if (codeNode.tokens.tokens.size >2) {
                                             val params = codeNode.tokens.tokens.subList(2, codeNode.tokens.tokens.size)
                                             params
-                                                .filter({param -> Constants.isRegister(param.text())})
                                                 .filter { param -> param.text().equals(key.label) }
                                                 .forEach({
                                                     if (codeNode.line > max) {

@@ -34,14 +34,16 @@ class CodeBlockTests {
         """.trimIndent()
 
         val codeGraph = graph(program)
-        assertEquals(3, codeGraph.nodeCount);
-        assertTrue(codeGraph.start() is
-                CodeNode.Start);
+        assertEquals(3, codeGraph.nodeCount)
+        assertTrue(
+            codeGraph.start() is
+                    CodeNode.Start
+        )
 
-        val codeNode: CodeNode.CodeBlock = codeGraph.start().mainMethod();
+        val codeNode: CodeNode.CodeBlock = codeGraph.start().mainMethod()
 
-        assertEquals(2, codeNode.lines.size);
-        assertTrue(codeGraph.end() is CodeNode.End);
+        assertEquals(2, codeNode.lines.size)
+        assertTrue(codeGraph.end() is CodeNode.End)
     }
 
     @Test
@@ -68,14 +70,16 @@ class CodeBlockTests {
         val inputInterval = mainCodeGraph.startNode.intervals(IntervalKey.LabelKey("input"))
 
         //youre super pretty all the time <3
-        assertTrue(functionNode!!.functionBody.start().mainMethod().lines[1].tokens[0].hasAttribute(TokenAttribute.ERROR))
+        assertTrue(
+            functionNode!!.functionBody.start().mainMethod().lines[1].tokens[0].hasAttribute(TokenAttribute.ERROR)
+        )
         assertEquals(5, mainCodeGraph.nodeCount) //Call nodes get their own node
         assertNotNull(functionNode)
-        assertEquals(3, functionNode!!.functionBody.nodeCount)
+        assertEquals(3, functionNode.functionBody.nodeCount)
 
 
-        assertEquals(9,inputInterval!!.start)
-        assertEquals(9,inputInterval.end)
+        assertEquals(9, inputInterval!!.start)
+        assertEquals(9, inputInterval.end)
 
 
     }
@@ -94,7 +98,7 @@ class CodeBlockTests {
         val intervalKey = IntervalKey.LabelKey("input")
         val labelInterval = codeGraph.start().intervals(intervalKey)
         assertEquals(2, labelInterval!!.start)
-        assertEquals(3, labelInterval!!.end)
+        assertEquals(3, labelInterval.end)
 
 
     }
@@ -116,7 +120,7 @@ class CodeBlockTests {
 
         val main = codeGraph.startNode.mainMethod()
 
-        assertEquals(5, codeGraph.nodeCount);
+        assertEquals(5, codeGraph.nodeCount)
         assertEquals(1, main.exits.size)
         //the second node links to itself
         assertEquals(2, main.exits.get(0).exits.size)
@@ -146,12 +150,12 @@ class CodeBlockTests {
                stop ; comment -
         """.trimIndent()
 
-        val codeGraph  = graph(program)
+        val codeGraph = graph(program)
         println(codeGraph.print())
 
-        assertEquals(7, codeGraph.nodeCount);
+        assertEquals(7, codeGraph.nodeCount)
 
-        val block1 = codeGraph.startNode.mainMethod() as CodeNode.CodeBlock
+        val block1 = codeGraph.startNode.mainMethod()
         val block2 = (block1).exits[0] as CodeNode.CodeBlock
         val block3 = (block2).exits[1] as CodeNode.CodeBlock
         val block4 = (block2).exits[0] as CodeNode.CodeBlock
@@ -176,7 +180,7 @@ class CodeBlockTests {
             """
         val file = CA65Scanner().tokenize(program)
         val codeGraph = CA65Grapher().graph(file, line = 0)
-        assertEquals(3, codeGraph.nodeCount);
+        assertEquals(3, codeGraph.nodeCount)
         assertEquals(3, codeGraph.startNode.mainMethod().lines.size)
 
     }
@@ -206,17 +210,22 @@ class CodeBlockTests {
         val main = codeGraph.start().main
         val badFunction = codeGraph.getFunction("test_funct_bad_param")
 
-        main.lines[0].tokens.forEach({assertFalse(it.hasAttribute(TokenAttribute.ERROR), it.message)})
-        (main.exits[0] as CodeNode.CallBlock).tokens.tokens.forEach({assertFalse(it.hasAttribute(TokenAttribute.ERROR), it.message)})
+        main.lines[0].tokens.forEach({ assertFalse(it.hasAttribute(TokenAttribute.ERROR), it.message) })
+        (main.exits[0] as CodeNode.CallBlock).tokens.tokens.forEach({
+            assertFalse(
+                it.hasAttribute(TokenAttribute.ERROR),
+                it.message
+            )
+        })
         val call1 = main.exits[0].exits[0].exits[0] as CodeNode.CallBlock
         assertTrue(call1.tokens.tokens[0].hasAttribute(TokenAttribute.ERROR))
         assertEquals("test_funct requires 1 parameters", call1.tokens.tokens[0].message)
         val call2 = call1.exits[0].exits[0] as CodeNode.CallBlock
-        assertTrue(call2.tokens.tokens[0].hasAttribute(TokenAttribute.ERROR))
+        assertTrue(call2.tokens.tokens[2].hasAttribute(TokenAttribute.ERROR))
         assertEquals("undeclared param", call2.tokens.tokens[2].message)
 
         assertTrue(badFunction!!.params[1].hasAttribute(TokenAttribute.ERROR))
-        assertEquals("invalid param", badFunction!!.params[1].message)
+        assertEquals("invalid param", badFunction.params[1].message)
 
     }
 
@@ -238,17 +247,17 @@ class CodeBlockTests {
 
         val codeGraph = graph(program)
         //println(codeGraph.print())
-        assertEquals(4, codeGraph.nodeCount);
+        assertEquals(4, codeGraph.nodeCount)
 
-        val main: CodeNode.CodeBlock = codeGraph.start().mainMethod();
+        val main: CodeNode.CodeBlock = codeGraph.start().mainMethod()
 
-        assertEquals(4, main.lines.size);
-        assertEquals(1, main.exits.size);
+        assertEquals(4, main.lines.size)
+        assertEquals(1, main.exits.size)
 
-        val afterJumpNode: CodeNode.CodeBlock = main.exits[0] as CodeNode.CodeBlock;
+        val afterJumpNode: CodeNode.CodeBlock = main.exits[0] as CodeNode.CodeBlock
 
-        assertEquals(3, afterJumpNode.lines.size);
-        assertEquals(1, afterJumpNode.exits.size);
+        assertEquals(3, afterJumpNode.lines.size)
+        assertEquals(1, afterJumpNode.exits.size)
 
         assertEquals("r3", afterJumpNode.lines[1].tokens[1].text())
 
@@ -294,8 +303,8 @@ class CodeBlockTests {
         assertEquals(6, interval?.end)
 
 
-
     }
+
 
     /**
      * A graph level interval calculates a liveliness range over an entire graph from
@@ -325,15 +334,32 @@ class CodeBlockTests {
             
         """.trimMargin()
 
-        /**
-         * A graph level interval calculates a liveliness range over an entire graph from
-         * start to finish.
-         */
-        @Test
-        fun `basic test of graph label intervals`() {
-            val program = """
-            function f1
-              iwt r2 , #5
+
+        val codeGraph = graph(program, 5)//assertEquals(1, codeGraph.)
+
+        val main = codeGraph.start()
+        val function = codeGraph.getFunction("f1")!!.functionBody.startNode
+
+        val mainInterval = main.intervals(IntervalKey.RegisterKey(Constants.Register.R1))
+        val functionInterval = function.intervals(IntervalKey.RegisterKey(Constants.Register.R2))
+
+
+        assertEquals(5, mainInterval?.start)
+        assertEquals(15, mainInterval?.end)
+
+        assertEquals(1, functionInterval?.start)
+        assertEquals(1, functionInterval?.end)
+    }
+
+    /**
+     * A graph level interval calculates a liveliness range over an entire graph from
+     * start to finish.
+     */
+    @Test
+    fun `basic test of graph label intervals`() {
+        val program = """
+            function f1 param1
+              iwt param1, #5
               return
             endfunction
             
@@ -351,51 +377,35 @@ class CodeBlockTests {
             iwt test , #5 
             stw ( test ) 
             
-            call f1
+            call f1 test
             
         """.trimMargin()
-
-            val codeGraph = graph(program, 5)//assertEquals(1, codeGraph.)
-
-            val main = codeGraph.start()
-            val function = codeGraph.getFunction("f1")!!.functionBody.startNode
-
-            val mainInterval = main.intervals(IntervalKey.LabelKey("test"))
-            val functionInterval = function.intervals(IntervalKey.RegisterKey(Constants.Register.R2))
-
-
-            assertEquals(5,mainInterval?.start)
-            assertEquals(15,mainInterval?.end)
-
-            assertEquals(1, functionInterval?.start)
-            assertEquals(1,functionInterval?.end)
-        }
-
 
         val codeGraph = graph(program, 5)//assertEquals(1, codeGraph.)
 
         val main = codeGraph.start()
         val function = codeGraph.getFunction("f1")!!.functionBody.startNode
 
-        val mainInterval = main.intervals(IntervalKey.RegisterKey(Constants.Register.R1))
-        val functionInterval = function.intervals(IntervalKey.RegisterKey(Constants.Register.R2))
+        val mainInterval = main.intervals(IntervalKey.LabelKey("test"))
+        val functionInterval = function.intervals(IntervalKey.LabelKey("param1"))
 
 
-        assertEquals(5,mainInterval?.start)
-        assertEquals(15,mainInterval?.end)
+        assertEquals(7, mainInterval?.start)
+        assertEquals(19, mainInterval?.end)
 
         assertEquals(1, functionInterval?.start)
-        assertEquals(1,functionInterval?.end)
+        assertEquals(1, functionInterval?.end)
     }
 
     private fun graph(program: String, mainStartLine: Int = 0): CodeGraph {
         val file = (CA65Scanner().tokenize(program))
+        
         val symbolService = SymbolService()
         symbolService.extractDefinitions(file)
         file.uri = URI.create("./test.sgs")
         val fileService = MockFileService(file)
-        return  CA65Grapher(symbolService = symbolService, fileService = fileService)
-                    .graph(file = file, line = mainStartLine)
+        return CA65Grapher(symbolService = symbolService, fileService = fileService)
+            .graph(file = file, line = mainStartLine)
 
     }
 
@@ -415,6 +425,35 @@ class CodeBlockTests {
         assertEquals(1, block.intervals[IntervalKey.LabelKey("l1")]!!.start)
         assertEquals(2, block.intervals[IntervalKey.LabelKey("l1")]!!.end)
     }
+
+    @Test
+    fun `test loops`() {
+        val program = """
+            iwt r8, #$12
+            for 5
+                from r8
+                to r5
+                add #$2
+            endfor
+            
+            stw (r8)
+            
+        """.trimIndent()
+
+        val programGraph = graph(program)
+
+        assertEquals(5, programGraph.nodeCount)
+        assertEquals(0,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R8))!!.start)
+        assertEquals(7,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R8))!!.end)
+        assertEquals(1,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R12))!!.start)
+        assertEquals(5,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R12))!!.end)
+        assertEquals(1,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R13))!!.start)
+        assertEquals(5,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R13))!!.end)
+        assertEquals(4,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R5))!!.start)
+        assertEquals(4,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R5))!!.end)
+
+    }
+
     @Test
     fun `handle sreg and dreg`() {
         val program = """
@@ -444,7 +483,7 @@ class CodeBlockTests {
     }
 }
 
-class MockFileService(val file:TokenizedFile) : FileService() {
+class MockFileService(val file: TokenizedFile) : FileService() {
     override fun readLines(fileUri: URI?): TokenizedFile {
         return file
     }

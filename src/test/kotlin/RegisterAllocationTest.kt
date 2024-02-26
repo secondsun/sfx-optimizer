@@ -60,40 +60,7 @@ class RegisterAllocationTest {
 
     }
 
-    /**
-     * ```
-     *
-     * function myFunc param
-     *    sub param
-     *    return
-     *  endfunction
-     *
-     *  register newParam
-     *  iwt myParam, #42
-     *  call myFunc newParam
-     * ```
-     *
-     * should translate to
-     *
-     * function myFunc
-     *   sub r1
-     *
-     */
-    @Test
-    fun `trivial function call`() {
-        TODO()
-    }
 
-    /**
-     * The follow should throw an error
-     *
-     * ```
-     *   call myFunction example
-     * ```
-     */
-    @Test
-    fun `undeclared variables in function call are an error`() {
-        TODO()
-    }
+
 
 }
