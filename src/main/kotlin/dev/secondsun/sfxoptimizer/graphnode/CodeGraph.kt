@@ -1,4 +1,6 @@
-package dev.secondsun.sfxoptimizer
+package dev.secondsun.sfxoptimizer.graphnode
+
+import dev.secondsun.sfxoptimizer.graphbuilder.CodeNodeVisitor
 
 class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode.End) {
 

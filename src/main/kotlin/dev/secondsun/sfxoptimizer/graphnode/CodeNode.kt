@@ -1,9 +1,13 @@
-package dev.secondsun.sfxoptimizer
+package dev.secondsun.sfxoptimizer.graphnode
 
 import dev.secondsun.retro.util.Location
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.vo.Tokens
+import dev.secondsun.sfxoptimizer.graphbuilder.CodeNodeVisitor
+import dev.secondsun.sfxoptimizer.Constants
+import dev.secondsun.sfxoptimizer.Interval
+import dev.secondsun.sfxoptimizer.IntervalKey
 
 sealed class CodeNode {
 
@@ -47,7 +51,7 @@ sealed class CodeNode {
 
     data class Start(val main: CodeBlock) : CodeNode() {
 
-        fun intervals(key:IntervalKey):Interval? {
+        fun intervals(key: IntervalKey): Interval? {
                 var min = Int.MAX_VALUE
                 var max = Int.MIN_VALUE
 
@@ -84,7 +88,7 @@ sealed class CodeNode {
                                       if (codeNode.tokens.tokens.size >2) {
                                           val params = codeNode.tokens.tokens.subList(2, codeNode.tokens.tokens.size)
                                           params
-                                              .filter({param -> Constants.isRegister(param.text())})
+                                              .filter({param -> Constants.isRegister(param.text()) })
                                               .filter { param -> param.text().equals(key.register.label) }
                                               .forEach({
                                                   if (codeNode.line > max) {
@@ -136,14 +140,14 @@ sealed class CodeNode {
             node.accept(visitor)
             visited.add(node)
             node.exits.forEach { traverse(visitor, visited, it) }
-            if (node is CodeNode.CallBlock) {
+            if (node is CallBlock) {
                 traverse(visitor,visited,node.function)
-            } else if (node is CodeNode.Start) {
+            } else if (node is Start) {
                 traverse(visitor,visited,node.main)
             }
         }
 
-        fun mainMethod(): CodeNode.CodeBlock {
+        fun mainMethod(): CodeBlock {
             return main
         }
 
@@ -242,7 +246,7 @@ sealed class CodeNode {
             attributes.add(attr)
         }
 
-        fun split(idx: Int): Pair<CodeNode.CodeBlock, CodeNode.CodeBlock> {
+        fun split(idx: Int): Pair<CodeBlock, CodeBlock> {
             //make two new nodes
             //link nodes
             //move this.entrances to newNodes[0]
@@ -280,12 +284,12 @@ sealed class CodeNode {
 
     }
 
-    data class CallBlock(val function: CodeNode.FunctionStart,val line :Int, val tokens:Tokens) : CodeNode() {
+    data class CallBlock(val function: FunctionStart, val line :Int, val tokens:Tokens) : CodeNode() {
 
 
     }
 
-    data class FunctionStart(val functionName: String, val location: Location, val functionBody: CodeGraph,val params: List<Token>) :
+    data class FunctionStart(val functionName: String, val location: Location, val functionBody: CodeGraph, val params: List<Token>) :
         CodeNode() {
     }
 }

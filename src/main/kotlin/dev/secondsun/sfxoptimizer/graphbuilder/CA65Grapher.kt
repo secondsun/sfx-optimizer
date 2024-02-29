@@ -1,4 +1,4 @@
-package dev.secondsun.sfxoptimizer
+package dev.secondsun.sfxoptimizer.graphbuilder
 
 import dev.secondsun.retro.util.*
 import dev.secondsun.retro.util.instruction.GSUInstruction
@@ -7,6 +7,9 @@ import dev.secondsun.retro.util.vo.Tokens
 import java.net.URI
 import kotlin.collections.MutableSet
 import dev.secondsun.retro.util.instruction.Instructions
+import dev.secondsun.sfxoptimizer.Constants
+import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
+import dev.secondsun.sfxoptimizer.graphnode.CodeNode
 
 typealias FileName = URI
 typealias LineNumber = Int
@@ -76,7 +79,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         for (idx in line..<file.textLines()) {
 
             //Check to make sure we haven't stepped/jumped into an existing block
-            val stepInType:StepInType = getStepInType(file,idx,line)
+            val stepInType: StepInType = getStepInType(file,idx,line)
 
             when(stepInType) {
 
@@ -160,6 +163,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     nextBlock.addEntrance(code)
                     break;
                 } else if (isForLoop(tokens)) {
+                    val enfForLine : Int = findEndFor(file,idx)
                     TODO()
                 } else if (isEndFor(tokens)) {
                     TODO()
@@ -232,12 +236,17 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                                 Instructions.COLOR -> {useSreg(code, firstToken.lineNumber);dReg = null}
                                 Instructions.DEC -> {sReg = null;dReg = null;code.addRead(tokens[1]);code.addWrite(tokens[1])}
                                 Instructions.DIV2 -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.FMULT -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(Constants.Register.R6, firstToken.lineNumber)}
+                                Instructions.FMULT -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(
+                                    Constants.Register.R6, firstToken.lineNumber)}
 
-                                Instructions.GETB -> {sReg = null;useDreg(code, firstToken.lineNumber); code.addRead(Constants.Register.R14, firstToken.lineNumber)}
-                                Instructions.GETBH -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber); code.addRead(Constants.Register.R14, firstToken.lineNumber)}
-                                Instructions.GETBL -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber); code.addRead(Constants.Register.R14, firstToken.lineNumber)}
-                                Instructions.GETBS ->{sReg = null;useDreg(code, firstToken.lineNumber); code.addRead(Constants.Register.R14, firstToken.lineNumber)}
+                                Instructions.GETB -> {sReg = null;useDreg(code, firstToken.lineNumber); code.addRead(
+                                    Constants.Register.R14, firstToken.lineNumber)}
+                                Instructions.GETBH -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber); code.addRead(
+                                    Constants.Register.R14, firstToken.lineNumber)}
+                                Instructions.GETBL -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber); code.addRead(
+                                    Constants.Register.R14, firstToken.lineNumber)}
+                                Instructions.GETBS ->{sReg = null;useDreg(code, firstToken.lineNumber); code.addRead(
+                                    Constants.Register.R14, firstToken.lineNumber)}
                                 Instructions.GETC -> {sReg = null;dReg = null; code.addRead(Constants.Register.R14, firstToken.lineNumber)}
                                 Instructions.HIB -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.IBT -> {sReg = null;dReg = null;code.addWrite(tokens[1])}
@@ -248,11 +257,14 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                                 Instructions.LINK -> {sReg = null;dReg = null;code.addWrite(Constants.Register.R11, firstToken.lineNumber)}
                                 Instructions.LM -> {sReg = null;dReg = null;code.addWrite(tokens[1])}
                                 Instructions.LMS -> {sReg = null;dReg = null;code.addWrite(tokens[1])}
-                                Instructions.LMULT -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(Constants.Register.R6, firstToken.lineNumber);code.addWrite(Constants.Register.R4, firstToken.lineNumber)}
+                                Instructions.LMULT -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(
+                                    Constants.Register.R6, firstToken.lineNumber);code.addWrite(Constants.Register.R4, firstToken.lineNumber)}
                                 Instructions.LOB -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.LOOP -> {code.addRead(Constants.Register.R13, firstToken.lineNumber);code.addWrite(Constants.Register.R12, firstToken.lineNumber)}
+                                Instructions.LOOP -> {code.addRead(Constants.Register.R13, firstToken.lineNumber);code.addWrite(
+                                    Constants.Register.R12, firstToken.lineNumber)}
                                 Instructions.LSR -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.MERGE -> {useDreg(code, firstToken.lineNumber);sReg = null;code.addRead(Constants.Register.R7, firstToken.lineNumber);code.addRead(Constants.Register.R8, firstToken.lineNumber)}
+                                Instructions.MERGE -> {useDreg(code, firstToken.lineNumber);sReg = null;code.addRead(
+                                    Constants.Register.R7, firstToken.lineNumber);code.addRead(Constants.Register.R8, firstToken.lineNumber)}
                                 Instructions.MOVE -> {sReg = null;dReg = null;code.addWrite(tokens[1]);code.addRead(tokens[3])}
                                 Instructions.MOVES -> {sReg = null;dReg = null;code.addWrite(tokens[1]);}
                                 Instructions.MULT_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
@@ -261,12 +273,14 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                                 Instructions.NOT ->  {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.OR_REGISTER -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
                                 Instructions.OR_CONST ->    {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.PLOT -> {code.addRead(Constants.Register.R1, firstToken.lineNumber);code.addRead(Constants.Register.R2, firstToken.lineNumber) }
+                                Instructions.PLOT -> {code.addRead(Constants.Register.R1, firstToken.lineNumber);code.addRead(
+                                    Constants.Register.R2, firstToken.lineNumber) }
                                 Instructions.RAMB -> {useSreg(code, firstToken.lineNumber); dReg=null }
                                 Instructions.ROL -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
                                 Instructions.ROMB -> {useSreg(code, firstToken.lineNumber); dReg=null }
                                 Instructions.ROR -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
-                                Instructions.RPIX -> {sReg = null; useDreg(code,firstToken.lineNumber);code.addRead(Constants.Register.R2, firstToken.lineNumber);code.addRead(Constants.Register.R1, firstToken.lineNumber)}
+                                Instructions.RPIX -> {sReg = null; useDreg(code,firstToken.lineNumber);code.addRead(
+                                    Constants.Register.R2, firstToken.lineNumber);code.addRead(Constants.Register.R1, firstToken.lineNumber)}
                                 Instructions.SBC -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);code.addRead(tokens[1])}
                                 Instructions.SBK -> {useSreg(code, firstToken.lineNumber);dReg = null}
                                 Instructions.SEX -> {useSreg(code, firstToken.lineNumber);useDreg(code,firstToken.lineNumber);}
@@ -304,6 +318,34 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
             }
         }
         return code
+    }
+
+    /**
+     * Returns the line number of the end of the for loop
+     *
+     * Recursive
+     *
+     * @param file is the file the for loop is in
+     * @param idx is the index of the start of the for loop
+     *
+     * @throws IllegalArgumentException if idx is not a for loop start
+     *
+     */
+    private fun findEndFor(file: TokenizedFile, idxIn: Int): Int {
+        var idx = idxIn
+        val line = file.getLine(idx)
+        if (!isForLoop(line)) {
+            throw IllegalArgumentException("findEndFor is not started on a for loop")
+        }
+
+        while (line != null && line[0].type != TokenType.TOK_EOF) {
+            idx += 1
+            val line = file.getLine(idx)
+        }
+
+
+
+        TODO()
     }
 
     private fun isEndFor(tokens: Tokens): Boolean {
@@ -473,7 +515,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         return token.equals("endfunction") || token.equals("return")
     }
 
-    private fun useSreg(code:CodeNode.CodeBlock, line:Int) {
+    private fun useSreg(code: CodeNode.CodeBlock, line:Int) {
 
         if (sReg != null) {
             sReg!!.lineNumber = line
@@ -485,7 +527,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         sReg = null
     }
 
-    private fun useDreg(code:CodeNode.CodeBlock, line:Int) {
+    private fun useDreg(code: CodeNode.CodeBlock, line:Int) {
         if (dReg != null) {
             dReg!!.lineNumber = line
             code.addWrite(dReg!!)

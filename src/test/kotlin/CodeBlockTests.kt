@@ -4,6 +4,9 @@ import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.sfxoptimizer.*
+import dev.secondsun.sfxoptimizer.graphbuilder.CA65Grapher
+import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
+import dev.secondsun.sfxoptimizer.graphnode.CodeNode
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import java.net.URI
