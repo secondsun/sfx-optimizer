@@ -40,7 +40,24 @@ class Interval(val key:IntervalKey) {
 
 }
 
+/**
+ * Interval keys present a way to represent liveliness.
+ * Each key represents a kind of reference that the register allocator must reason about.
+ */
 sealed interface IntervalKey {
+    /**
+     * A registerkey is created when a register is explicitly used.
+     * The allocator uses these keys to remove registers from pools when they're
+     * required by certain instructions such as loop, mult, merge, etc.
+     *
+     * In general code written should use register labels and let the allocator handle them.
+     */
     data class RegisterKey(val register:Constants.Register):IntervalKey
+
+    /**
+     * A label key represents a label in code that is a stand in for a register.
+     * In this project this is often called a RegisterLabel.
+     */
     data class LabelKey(val label:String):IntervalKey
+
 }

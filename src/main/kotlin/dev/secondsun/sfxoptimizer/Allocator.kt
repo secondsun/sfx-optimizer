@@ -3,82 +3,119 @@ package dev.secondsun.sfxoptimizer
 
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenType
-import dev.secondsun.retro.util.instruction.GSUInstruction
-import dev.secondsun.retro.util.vo.TokenizedFile
-import dev.secondsun.sfxoptimizer.Constants
 import dev.secondsun.sfxoptimizer.Constants.Register.*
-import java.util.*
-import kotlin.collections.HashMap
+import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
+import dev.secondsun.sfxoptimizer.graphnode.CodeNode
 
 sealed interface AllocationResult {
     data class Register(val register:Constants.Register):AllocationResult;
     object Spill:AllocationResult{};
 
 }
-data class AllocationContext(val registerPool:MutableList<Constants.Register> = mutableListOf(R1, R2, R3, R4, R5, R6,R7,R8,R9,R11), val parings:MutableMap<String, Constants.Register> = mutableMapOf()) {
+data class AllocationContext(val registerPool:MutableList<Constants.Register> = mutableListOf(R0, R1, R2, R3, R4, R5, R6,R7,R8,R9,R11,R12,R13, R14)) {
 
 
-    fun allocate(label : String) : AllocationResult {
+    /**
+     * Removes a register or spills
+     */
+    fun allocate() : AllocationResult {
         if (registerPool.isEmpty()) {
             return AllocationResult.Spill
         } else {
             val register = registerPool.removeFirst()
-            parings[label] = register
             return AllocationResult.Register(register)
         }
+    }
+
+    /**
+     * Removes a register to the pool
+     */
+    fun reserve( register: Constants.Register) {
+        registerPool.remove(register)
+    }
+
+    /**
+     * Returns a register to the pool
+     */
+    fun free( register: Constants.Register) {
+        registerPool.add(register)
     }
 
 }
 
 
+/**
+ * Attach registers to register labels.
+ */
+fun allocate(program:CodeGraph) {
 
-fun allocate(program:TokenizedFile):String {
+    //build function stack
+    //for each stack entry allocate registers
+    val graphStack =mutableListOf<CodeNode.FunctionStart>()
+    fillGraphStack(program, graphStack);
+
+    //First pass intervals, allocate function locals
+    graphStack.asReversed().forEach { allocateFunction(it) }
+
+    //Second pass intervals, allocate around function calls
+    // this needs to handle circular function references
+    // and parameters
+
+    TODO(":Allocate calls")
+
+    TODO(":Allocate main")
+
+
+}
+
+fun allocateFunction(function: CodeNode.FunctionStart) {
     val context = AllocationContext()
-    val output = StringBuilder()
-    var dirtyLine = false;
+    val intervals : MutableList<Interval> = mutableListOf()
+    var startline = Int.MAX_VALUE;
+    var endline = Int.MIN_VALUE;
 
-    for (idx in 0..<program.textLines()) {
-        val line = program.getLine(idx)
-
-        if (line.tokens.isEmpty()) {
-            continue
-        }
-
-        val firstToken = line.tokens[0]
-        if (firstToken.text().equals("register")) {
-            for (tokenIndex in 1..<line.tokens.size) {
-                val token = line.tokens[tokenIndex]
-                if (token.type == TokenType.TOK_IDENT) {
-                    if (context.allocate(token.text()) is AllocationResult.Spill) {
-                        throw RuntimeException("Spill is not handled")
+    /**
+     * Find function start and end
+     */
+    function.functionBody.start().traverse { node ->
+        when (node) {
+            is CodeNode.CallBlock -> {if (node.line <startline) {startline = node.line};if (node.line > endline) endline = node.line}
+            is CodeNode.CodeBlock -> {
+                with(node) {
+                    lines.forEach { line ->
+                        if (line.tokens[0].lineNumber <startline) {startline = line.tokens[0].lineNumber};if (line.tokens[0].lineNumber > endline) endline = line.tokens[0].lineNumber
                     }
                 }
             }
-        } else if (GSUInstruction.isInstruction(firstToken)) {
-            output.append(firstToken.text())
-            output.append(" ")
-            for (tokenIndex in 1..<line.tokens.size) {
-                val token = line.tokens[tokenIndex]
-                if (isArgument(token)) {
-                    output.append(context.parings[token.text()]?.label)
-                    output.append(" ")
-                    dirtyLine = true
-                } else {
-                    output.append(token.text())
-                    if (peekToken(line.tokens, tokenIndex + 1)?.type != TokenType.TOK_INTCON) {
-                        output.append(" ")
-                    }
-                    dirtyLine = true
-                }
-            }
-        }
-        if (dirtyLine) {
-            dirtyLine = false;
-            output.append("\n")
+            CodeNode.End -> {}
+            is CodeNode.FunctionStart -> {}
+            is CodeNode.Start -> {}
         }
     }
 
-    return output.toString()
+    //Find all intervals not in calls
+
+
+    TODO("Not yet implemented")
+}
+
+/**
+ * Fills the @param graphStack with data from @param program
+ */
+private fun fillGraphStack(
+    program: CodeGraph,
+    graphStack: MutableList<CodeNode.FunctionStart>
+){
+
+    program.traverse() { node ->
+        if (node is CodeNode.CallBlock) {
+            if (!graphStack.contains(node.function)) {
+                graphStack.add(node.function)
+                fillGraphStack(node.function.functionBody, graphStack)
+            }
+        }
+    }
+
 }
 
 fun peekToken(tokens: List<Token>, i: Int): Token? {

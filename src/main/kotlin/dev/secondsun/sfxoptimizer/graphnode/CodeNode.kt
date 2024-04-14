@@ -55,7 +55,7 @@ sealed class CodeNode {
                 var min = Int.MAX_VALUE
                 var max = Int.MIN_VALUE
 
-                traverse(
+                traverse()
                     { codeNode ->
                         when(codeNode) {
                             is CodeBlock -> {
@@ -122,7 +122,7 @@ sealed class CodeNode {
                             else -> {}
                         }
                     }
-                )
+
 
             if (min == Int.MAX_VALUE) {
                 return null
@@ -132,18 +132,18 @@ sealed class CodeNode {
 
         }
 
-        fun traverse(visitor: CodeNodeVisitor, visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.main) {
+        fun traverse(visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.main, visitor: CodeNodeVisitor) {
             if (visited.contains(node)) {
                 return
             }
 
             node.accept(visitor)
             visited.add(node)
-            node.exits.forEach { traverse(visitor, visited, it) }
+            node.exits.forEach { traverse(visited, it, visitor) }
             if (node is CallBlock) {
-                traverse(visitor,visited,node.function)
+                traverse(visited,node.function, visitor)
             } else if (node is Start) {
-                traverse(visitor,visited,node.main)
+                traverse(visited,node.main,visitor)
             }
         }
 

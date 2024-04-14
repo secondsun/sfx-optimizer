@@ -35,12 +35,12 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         val mainNode = makeNode(file,line);
         val start = CodeNode.Start(mainNode)
         val programGraph = CodeGraph(start)
-        programGraph.traverse({ node ->
+        programGraph.traverse() { node ->
             when(node) {
                 is CodeNode.FunctionStart -> programGraph.addFunction(node.functionName, node)
                 else -> {}
             }
-        })
+        }
 
         return programGraph
     }
@@ -52,19 +52,21 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
 
         val functionLine  = lines.getLineTokens(location.line)
         val params = functionLine.subList(2,functionLine.size)
-        params.forEach({param -> if (param.type != TokenType.TOK_IDENT){
-            param.addAttribute(TokenAttribute.ERROR)
-            param.message = "invalid param"
-        } })
+        params.forEach { param ->
+            if (param.type != TokenType.TOK_IDENT) {
+                param.addAttribute(TokenAttribute.ERROR)
+                param.message = "invalid param"
+            }
+        }
         val mainNode = makeNode(lines,location.line+1, registerLabels = params.map { RegisterLabel(it.text()) }.toMutableSet());
         val start = CodeNode.Start(mainNode)
         val functionBody = CodeGraph(start)
-        functionBody.traverse({ node ->
+        functionBody.traverse(){ node ->
             when(node) {
                 is CodeNode.FunctionStart -> functionBody.addFunction(node.functionName, node)
                 else -> {}
             }
-        })
+        }
 
         val functionNode = CodeNode.FunctionStart(functionName, location, functionBody, params)
         return functionNode;
@@ -163,10 +165,63 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                     nextBlock.addEntrance(code)
                     break;
                 } else if (isForLoop(tokens)) {
-                    val enfForLine : Int = findEndFor(file,idx)
-                    TODO()
+                    code.addLine(tokens)
+                    val endForLine : Int = findEndFor(file,idx)
+                    if (endForLine == -1) {
+                        tokens[0].addAttribute(TokenAttribute.ERROR)
+                        tokens[0].message = "Missing endfor"
+
+                    } else {
+                        val forOrForR = tokens[0].text()
+                        if (forOrForR.equals("for", true)) {
+                            //add body as exit
+                            code.addWrite(Constants.Register.R12, idx)
+                            code.addWrite(Constants.Register.R13, idx)
+                            var nextBlock = makeNode(file, idx+1, registerLabels =  registerLabels )
+
+
+                            code.addExit(nextBlock)
+                            nextBlock.addEntrance(code)
+
+                            //add end of loop as exit
+                            nextBlock = makeNode(file, endForLine + 1, registerLabels =  registerLabels )
+                            code.addWrite(Constants.Register.R12, endForLine)
+                            code.addRead(Constants.Register.R12, endForLine)
+                            code.addRead(Constants.Register.R13, endForLine)
+                            code.addExit(nextBlock)
+                            nextBlock.addEntrance(code)
+                            break;
+                        } else {//check forR
+                            val count = tokens[1]
+                            if (count.type != TokenType.TOK_REGISTER && !registerLabels.contains(RegisterLabel(count.text()))) {
+                                tokens[0].addAttribute(TokenAttribute.ERROR)
+                                tokens[0].message = "Register required"
+                            }
+                            //add body as exit
+                            code.addWrite(Constants.Register.R12, idx)
+                            code.addWrite(Constants.Register.R13, idx)
+                            code.addRead(count)
+                            count.addMetadata(TokenAttribute.REGISTER_LABEL, registerLabels.find { it.label == count.text() })
+
+                            var nextBlock = makeNode(file, idx+1, registerLabels =  registerLabels )
+
+                            code.addExit(nextBlock)
+                            nextBlock.addEntrance(code)
+
+                            //add end of loop as exit
+                            nextBlock = makeNode(file, endForLine + 1, registerLabels =  registerLabels )
+                            code.addWrite(Constants.Register.R12, endForLine)
+                            code.addRead(Constants.Register.R12, endForLine)
+                            code.addRead(Constants.Register.R13, endForLine)
+                            code.addExit(nextBlock)
+                            nextBlock.addEntrance(code)
+                            break;
+                        }
+                    }
                 } else if (isEndFor(tokens)) {
-                    TODO()
+                    code.addLine(tokens)
+                    tokens[0].addAttribute(TokenAttribute.ERROR)
+                    tokens[0].message = "Unexpected endfor"
                 } else if (isReturnOrEndFunction(tokens)) {//handle return
                     code.addLine(tokens)
                     code.addExit(CodeNode.End)
@@ -330,22 +385,35 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
      *
      * @throws IllegalArgumentException if idx is not a for loop start
      *
+     * @return -1 if no endFor, otherwise line of endfor
      */
     private fun findEndFor(file: TokenizedFile, idxIn: Int): Int {
         var idx = idxIn
-        val line = file.getLine(idx)
+        var line = file.getLine(idx)
         if (!isForLoop(line)) {
-            throw IllegalArgumentException("findEndFor is not started on a for loop")
+            throw IllegalArgumentException("find EndFor is not started on a for loop")
         }
 
         while (line != null && line[0].type != TokenType.TOK_EOF) {
             idx += 1
-            val line = file.getLine(idx)
+            line = file.getLine(idx)
+            if (isEndFor(line)) {
+                return idx
+            }
+
+            if (isForLoop(line)) {
+                idx = 1 + findEndFor(file, idx)
+            }
+
         }
 
+        file.getLine(idxIn).apply{
+            tokens[0].addAttribute(TokenAttribute.ERROR)
+            tokens[0].message = "Missing endfor"
+        }
 
+        return -1
 
-        TODO()
     }
 
     private fun isEndFor(tokens: Tokens): Boolean {
@@ -356,13 +424,6 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                 firstToken.message = "End for takes no params"
                 firstToken.addAttribute(TokenAttribute.ERROR)
                 return false
-            } else {
-                val secondToken = tokens[1]
-                if (secondToken.type != TokenType.TOK_INTCON) {
-                    secondToken.message = "For loops require an int"
-                    secondToken.addAttribute(TokenAttribute.ERROR)
-                    return false
-                }
             }
 
             return true;
@@ -388,17 +449,22 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
             }
 
             return true;
-        } else if (firstToken.text().lowercase().equals("forR")) {
+        } else if (firstToken.text().equals("forR")) {
             if (tokens.tokens.size != 2) {
                 firstToken.message = "For loops have only one parameter"
                 firstToken.addAttribute(TokenAttribute.ERROR)
                 return false
             } else {
                 val secondToken = tokens[1]
-                if (secondToken.type != TokenType.TOK_REGISTER) {
+                if (secondToken.type != TokenType.TOK_REGISTER && secondToken.type != TokenType.TOK_IDENT) {
                     secondToken.message = "ForR loops require an register"
                     secondToken.addAttribute(TokenAttribute.ERROR)
                     return false
+                } else {
+                    if (secondToken.type == TokenType.TOK_IDENT) {
+                        secondToken.addAttribute(TokenAttribute.REGISTER_LABEL)
+                    }
+                    return true
                 }
             }
         }

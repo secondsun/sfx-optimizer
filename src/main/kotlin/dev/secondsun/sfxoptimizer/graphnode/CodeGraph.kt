@@ -13,8 +13,8 @@ class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode
     }
 
 
-    fun traverse(visitor: CodeNodeVisitor, visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.startNode) {
-        start().traverse(visitor,visited, node)
+    fun traverse(visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.startNode, visitor: CodeNodeVisitor) {
+        start().traverse(visited, node, visitor)
     }
 
     private fun countChildren(node : CodeNode, visited : MutableSet<CodeNode> = mutableSetOf()) :Int {
@@ -45,13 +45,18 @@ class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode
         builder.appendLine("---- Node start ---")
         builder.appendLine("Hashcode \t: ${node.hashCode()}")
         builder.appendLine("Entrances \t: ${node.entrances.joinToString(","){it->it.hashCode().toString()}}" )
+
+        builder.appendLine("Attributes \t: ${node.attributes.joinToString(","){it->it.name}}" )
         builder.appendLine("Exits \t\t: ${node.exits.joinToString(","){it->it.hashCode().toString()}}" )
         builder.appendLine(node.lines.joinToString("") { tokens ->  indent + tokens.line })
+
 
         node.exits.forEach { exitNode ->
             when (exitNode) {
                 is CodeNode.Start -> throw IllegalStateException("Start nodes can't be children")
-                is CodeNode.CodeBlock -> builder.appendLine(print(exitNode, visited, indent + "\t"))
+                is CodeNode.CodeBlock -> {
+                    builder.appendLine(print(exitNode, visited, indent + "\t"))
+                }
                 is CodeNode.End -> {}
                 is CodeNode.CallBlock -> builder.appendLine("Call ${exitNode.function.functionName}")
                 is CodeNode.FunctionStart -> {}

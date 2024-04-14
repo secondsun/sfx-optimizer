@@ -400,17 +400,7 @@ class CodeBlockTests {
         assertEquals(1, functionInterval?.end)
     }
 
-    private fun graph(program: String, mainStartLine: Int = 0): CodeGraph {
-        val file = (CA65Scanner().tokenize(program))
-        
-        val symbolService = SymbolService()
-        symbolService.extractDefinitions(file)
-        file.uri = URI.create("./test.sgs")
-        val fileService = MockFileService(file)
-        return CA65Grapher(symbolService = symbolService, fileService = fileService)
-            .graph(file = file, line = mainStartLine)
 
-    }
 
     @Test
     fun `defining a variable creates register and label intervals`() {
@@ -430,7 +420,59 @@ class CodeBlockTests {
     }
 
     @Test
-    fun `test loops`() {
+    fun `test nested for loops`() {
+        val program = """
+            register count = r8
+            iwt count, #$12
+            forR count
+                from count
+                for 5
+                  iwt r6, #0
+                endfor
+                to r5
+                add #$2
+            endfor
+            
+            stop
+            
+        """.trimIndent()
+        val graph = graph(program)
+        println(graph.print())
+    }
+
+    @Test
+    fun `test forr loops`() {
+        val program = """
+            register count = r8
+            iwt count, #$12
+            forR count
+                from count
+                to r5
+                add #$2
+            endfor
+            
+            stop
+            
+        """.trimIndent()
+
+        val programGraph = graph(program)
+        println(programGraph.print(programGraph.startNode.mainMethod()))
+        assertEquals(5, programGraph.nodeCount)
+        assertEquals(1,programGraph.startNode.intervals(IntervalKey.LabelKey("count"))!!.start)
+        assertEquals(5,programGraph.startNode.intervals(IntervalKey.LabelKey("count"))!!.end)
+
+        assertEquals(2,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R12))!!.start)
+        assertEquals(6,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R12))!!.end)
+        assertEquals(2,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R13))!!.start)
+        assertEquals(6,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R13))!!.end)
+        assertEquals(5,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R5))!!.start)
+        assertEquals(5,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R5))!!.end)
+
+    }
+
+
+    @Test
+    fun `test for loops`() {
         val program = """
             iwt r8, #$12
             for 5
@@ -444,7 +486,7 @@ class CodeBlockTests {
         """.trimIndent()
 
         val programGraph = graph(program)
-
+        println(programGraph.print(programGraph.startNode.mainMethod()))
         assertEquals(5, programGraph.nodeCount)
         assertEquals(0,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R8))!!.start)
         assertEquals(7,programGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R8))!!.end)
