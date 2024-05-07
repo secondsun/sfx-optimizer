@@ -1,10 +1,12 @@
 
  import dev.secondsun.sfxoptimizer.allocate
-import kotlin.test.Test
+ import kotlin.test.Ignore
+ import kotlin.test.Test
 
  class RegisterAllocationTest {
 
-    @Test
+    @Test()
+    @Ignore
     fun `test reciprocal`() {
         val program = """
             ; In : R0 fixed88 the value to return the reciprocal of

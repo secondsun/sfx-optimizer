@@ -242,7 +242,6 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
                 } else if (isRegisterVariableDeclaration(tokens)) {//register
                     if (isRegisterVariableAssignment(tokens,registerLabels)) {//check for register $label = $register
                         registerLabels.add(RegisterLabel(tokens.tokens[1].text(), Constants.Register.valueOf(tokens[3].text().toString().uppercase())))
-                        code.addLine(tokens)
                     }//you so pretty
                     handleRegisterVariableDeclaration(tokens, registerLabels)
                     code.addLine(tokens)
@@ -390,6 +389,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     private fun findEndFor(file: TokenizedFile, idxIn: Int): Int {
         var idx = idxIn
         var line = file.getLine(idx)
+
         if (!isForLoop(line)) {
             throw IllegalArgumentException("find EndFor is not started on a for loop")
         }
@@ -397,11 +397,12 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
         while (line != null && line[0].type != TokenType.TOK_EOF) {
             idx += 1
             line = file.getLine(idx)
-            if (isEndFor(line)) {
+
+            if (line != null && isEndFor(line)) {
                 return idx
             }
 
-            if (isForLoop(line)) {
+            if (line != null && isForLoop(line)) {
                 idx = 1 + findEndFor(file, idx)
             }
 
@@ -417,6 +418,7 @@ class CA65Grapher(val symbolService: SymbolService = SymbolService(), val fileSe
     }
 
     private fun isEndFor(tokens: Tokens): Boolean {
+
         val firstToken = tokens[0]
         if (firstToken.text().lowercase().equals("endfor")) {
             //error checking

@@ -52,15 +52,16 @@ class CodeBlockTests {
     @Test
     fun `function blocks`() {
         val program = """
+            
             function somename 
-                register output
+                register output = r6
                 from variable1
                 to output
                 add  #$5
                 return  
             endfunction
             
-            register input, output
+            register input = r5
             iwt input, #5
             call somename 
             stop
@@ -80,12 +81,18 @@ class CodeBlockTests {
         assertNotNull(functionNode)
         assertEquals(3, functionNode.functionBody.nodeCount)
 
+        val intervals = mainCodeGraph.startNode.intervals(IntervalKey.RegisterKey(Constants.Register.R6))
 
-        assertEquals(9, inputInterval!!.start)
-        assertEquals(9, inputInterval.end)
+        assertEquals(11, intervals!!.start)
+        assertEquals(11, intervals.end)
+
+        assertEquals(10, inputInterval!!.start)
+        assertEquals(10, inputInterval.end)
 
 
     }
+
+
 
     @Test
     fun `test label interval`() {
@@ -105,6 +112,7 @@ class CodeBlockTests {
 
 
     }
+
 
     @Test
     fun `split code node when it is jumped into midway`() {
