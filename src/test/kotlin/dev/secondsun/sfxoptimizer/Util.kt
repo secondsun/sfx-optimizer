@@ -1,3 +1,5 @@
+package dev.secondsun.sfxoptimizer
+
 import dev.secondsun.retro.util.CA65Scanner
 import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.sfxoptimizer.graphbuilder.CA65Grapher

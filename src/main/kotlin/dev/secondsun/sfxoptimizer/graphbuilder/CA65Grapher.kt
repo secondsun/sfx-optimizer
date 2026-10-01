@@ -1,6 +1,7 @@
 package dev.secondsun.sfxoptimizer.graphbuilder
 
 import dev.secondsun.retro.util.*
+import dev.secondsun.retro.util.vo.Location
 import dev.secondsun.retro.util.instruction.GSUInstruction
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens

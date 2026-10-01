@@ -1,3 +1,5 @@
+package dev.secondsun.sfxoptimizer
+
 import kotlin.test.Test
 
 

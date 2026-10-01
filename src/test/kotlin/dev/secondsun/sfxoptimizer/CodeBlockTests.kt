@@ -1,3 +1,5 @@
+package dev.secondsun.sfxoptimizer
+
 import dev.secondsun.retro.util.CA65Scanner
 import dev.secondsun.retro.util.FileService
 import dev.secondsun.retro.util.SymbolService
@@ -189,7 +191,7 @@ class CodeBlockTests {
             
             iwt r6,#$9
             """
-        val file = CA65Scanner().tokenize(program)
+        val file = CA65Scanner().tokenize(program.trim())
         val codeGraph = CA65Grapher().graph(file, line = 0)
         assertEquals(3, codeGraph.nodeCount)
         assertEquals(3, codeGraph.startNode.mainMethod().lines.size)

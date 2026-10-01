@@ -1,6 +1,6 @@
 package dev.secondsun.sfxoptimizer.graphnode
 
-import dev.secondsun.retro.util.Location
+import dev.secondsun.retro.util.vo.Location
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.vo.Tokens
