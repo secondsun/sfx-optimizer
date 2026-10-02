@@ -84,18 +84,6 @@ Always use the included Maven wrapper (`./mvnw`):
   ```bash
   ./mvnw clean package
   ```
-- **Check Code Formatting (Spotless / ktlint)**:
-  ```bash
-  ./mvnw spotless:check
-  ```
-- **Apply Code Formatting (Spotless / ktlint)**:
-  ```bash
-  ./mvnw spotless:apply
-  ```
-- **Full Verification (Tests, Javadoc, Spotless, same as CI)**:
-  ```bash
-  ./mvnw clean verify -Dgpg.skip=true
-  ```
 
 ---
 
@@ -106,7 +94,6 @@ Always use the included Maven wrapper (`./mvnw`):
    - Use `data object` for singleton states in sealed hierarchies.
    - Prefer immutable collections (`List`, `Set`) except for internal allocation structures.
    - Use `Register.entries` rather than `Register.values()`.
-   - Avoid wildcard imports (`import foo.*`); ktlint and Spotless will reject them. Keep formatting clean with `./mvnw spotless:apply`.
 
 2. **Testing Guardrails**:
    - Maintain test fixtures in `src/test/resources/homebrew/` (`X-GSU` and `libSFX`). Do not modify these assembly files unless writing tests specifically targeting new syntax.
