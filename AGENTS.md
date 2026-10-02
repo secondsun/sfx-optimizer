@@ -84,7 +84,18 @@ Always use the included Maven wrapper (`./mvnw`):
   ```bash
   ./mvnw clean package
   ```
-
+-- **Check Code Formatting (Spotless / ktlint)**:
+  ```bash
+  ./mvnw spotless:check
+  ```
+-- **Apply Code Formatting (Spotless / ktlint)**:
+  ```bash
+  ./mvnw spotless:apply
+  ```
+-- **Full Verification (Tests, Javadoc, Spotless, same as CI)**:
+  ```bash
+  ./mvnw clean verify -Dgpg.skip=true
+  ```
 ---
 
 ## 5. Coding Standards & Agent Guidelines
