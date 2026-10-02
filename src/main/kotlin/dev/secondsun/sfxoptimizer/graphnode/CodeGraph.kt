@@ -2,25 +2,33 @@ package dev.secondsun.sfxoptimizer.graphnode
 
 import dev.secondsun.sfxoptimizer.graphbuilder.CodeNodeVisitor
 
-class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode.End) {
-
+class CodeGraph(
+    val startNode: CodeNode.Start,
+    val end: CodeNode.End = CodeNode.End,
+) {
     private val functions: MutableMap<String, CodeNode.FunctionStart> = mutableMapOf()
     private var _nodeCount = 0
     val nodeCount get() = _nodeCount
+
     init {
-        _nodeCount = 2//start node and end node
+        _nodeCount = 2 // start node and end node
         _nodeCount += countChildren(startNode.main)
     }
 
-
-    fun traverse(visited: MutableSet<CodeNode> = mutableSetOf(), node: CodeNode = this.startNode, visitor: CodeNodeVisitor) {
+    fun traverse(
+        visited: MutableSet<CodeNode> = mutableSetOf(),
+        node: CodeNode = this.startNode,
+        visitor: CodeNodeVisitor,
+    ) {
         start().traverse(visited, node, visitor)
     }
 
-    private fun countChildren(node : CodeNode, visited : MutableSet<CodeNode> = mutableSetOf()) :Int {
-
+    private fun countChildren(
+        node: CodeNode,
+        visited: MutableSet<CodeNode> = mutableSetOf(),
+    ): Int {
         if (visited.contains(node)) {
-            return visited.size;
+            return visited.size
         }
         visited.add(node)
 
@@ -35,21 +43,23 @@ class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode
         return visited.size
     }
 
-    fun print(node : CodeNode.CodeBlock = startNode.main, visited : MutableSet<CodeNode> = mutableSetOf(), indent :String = "") :String {
-
+    fun print(
+        node: CodeNode.CodeBlock = startNode.main,
+        visited: MutableSet<CodeNode> = mutableSetOf(),
+        indent: String = "",
+    ): String {
         if (visited.contains(node)) {
-            return "";
+            return ""
         }
         val builder = StringBuilder()
         visited.add(node)
         builder.appendLine("---- Node start ---")
         builder.appendLine("Hashcode \t: ${node.hashCode()}")
-        builder.appendLine("Entrances \t: ${node.entrances.joinToString(","){it->it.hashCode().toString()}}" )
+        builder.appendLine("Entrances \t: ${node.entrances.joinToString(","){it -> it.hashCode().toString()}}")
 
-        builder.appendLine("Attributes \t: ${node.attributes.joinToString(","){it->it.name}}" )
-        builder.appendLine("Exits \t\t: ${node.exits.joinToString(","){it->it.hashCode().toString()}}" )
-        builder.appendLine(node.lines.joinToString("") { tokens ->  indent + tokens.line })
-
+        builder.appendLine("Attributes \t: ${node.attributes.joinToString(","){it -> it.name}}")
+        builder.appendLine("Exits \t\t: ${node.exits.joinToString(","){it -> it.hashCode().toString()}}")
+        builder.appendLine(node.lines.joinToString("") { tokens -> indent + tokens.line })
 
         node.exits.forEach { exitNode ->
             when (exitNode) {
@@ -66,27 +76,19 @@ class CodeGraph(val startNode: CodeNode.Start, val end : CodeNode.End = CodeNode
         return builder.toString()
     }
 
+    fun start(): CodeNode.Start = startNode
 
-    fun start(): CodeNode.Start {
-        return startNode
-    }
-
-
-
-
-    fun end(): CodeNode.End {
-        return end
-    }
+    fun end(): CodeNode.End = end
 
     /**
      * Returns a function if it exists or null
      */
-    fun getFunction(functionName: String): CodeNode.FunctionStart? {
-        return functions[functionName]
-    }
+    fun getFunction(functionName: String): CodeNode.FunctionStart? = functions[functionName]
 
-    fun addFunction(functionName: String, node: CodeNode.FunctionStart) {
+    fun addFunction(
+        functionName: String,
+        node: CodeNode.FunctionStart,
+    ) {
         functions[functionName] = node
     }
-
 }

@@ -6,7 +6,10 @@ import dev.secondsun.sfxoptimizer.graphbuilder.CA65Grapher
 import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
 import java.net.URI
 
-fun graph(program: String, mainStartLine: Int = 0): CodeGraph {
+fun graph(
+    program: String,
+    mainStartLine: Int = 0,
+): CodeGraph {
     val file = (CA65Scanner().tokenize(program))
 
     val symbolService = SymbolService()
@@ -15,5 +18,4 @@ fun graph(program: String, mainStartLine: Int = 0): CodeGraph {
     val fileService = MockFileService(file)
     return CA65Grapher(symbolService = symbolService, fileService = fileService)
         .graph(file = file, line = mainStartLine)
-
 }

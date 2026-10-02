@@ -3,31 +3,33 @@ package dev.secondsun.sfxoptimizer
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.TokenType
-import dev.secondsun.sfxoptimizer.Constants.Register.*
 import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
 import dev.secondsun.sfxoptimizer.graphnode.CodeNode
 
 sealed interface AllocationResult {
-    data class Register(val register: Constants.Register) : AllocationResult
+    data class Register(
+        val register: Constants.Register,
+    ) : AllocationResult
+
     data object Spill : AllocationResult
 }
 
 data class AllocationContext(
-    val registerPool: MutableList<Constants.Register> = mutableListOf(
-        R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R11, R12, R13, R14
-    )
+    val registerPool: MutableList<Constants.Register> =
+        Constants.Register.entries
+            .filter { it != Constants.Register.R10 && it != Constants.Register.R15 }
+            .toMutableList(),
 ) {
     /**
      * Removes a register or spills
      */
-    fun allocate(): AllocationResult {
-        return if (registerPool.isEmpty()) {
+    fun allocate(): AllocationResult =
+        if (registerPool.isEmpty()) {
             AllocationResult.Spill
         } else {
             val register = registerPool.removeFirst()
             AllocationResult.Register(register)
         }
-    }
 
     /**
      * Removes a register from the pool
@@ -52,9 +54,10 @@ data class InterferenceGraph(
     val nodes: Set<IntervalKey>,
     val intervals: Map<IntervalKey, Interval>,
     val edges: Map<IntervalKey, Set<IntervalKey>>,
-    val precolored: Map<IntervalKey, Constants.Register> = emptyMap()
+    val precolored: Map<IntervalKey, Constants.Register> = emptyMap(),
 ) {
     fun neighbors(node: IntervalKey): Set<IntervalKey> = edges[node] ?: emptySet()
+
     fun degree(node: IntervalKey): Int = neighbors(node).size
 }
 
@@ -62,13 +65,13 @@ data class InterferenceGraph(
  * Graph-Coloring Register Allocator using the Chaitin-Briggs / Kempe heuristic.
  */
 class GraphColoringAllocator(
-    val registerPool: List<Constants.Register> = listOf(
-        R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R11, R12, R13, R14
-    )
+    val registerPool: List<Constants.Register> =
+        Constants.Register.entries
+            .filter { it != Constants.Register.R10 && it != Constants.Register.R15 },
 ) {
     fun buildInterferenceGraph(
         intervals: Map<IntervalKey, Interval>,
-        precolored: Map<IntervalKey, Constants.Register> = emptyMap()
+        precolored: Map<IntervalKey, Constants.Register> = emptyMap(),
     ): InterferenceGraph {
         val edges = mutableMapOf<IntervalKey, MutableSet<IntervalKey>>()
         for (node in intervals.keys) {
@@ -95,7 +98,7 @@ class GraphColoringAllocator(
             nodes = intervals.keys,
             intervals = intervals,
             edges = edges,
-            precolored = precolored
+            precolored = precolored,
         )
     }
 
@@ -177,7 +180,7 @@ class GraphColoringAllocator(
  */
 data class AllocationReport(
     val functionAllocations: Map<String, Map<IntervalKey, AllocationResult>>,
-    val mainAllocation: Map<IntervalKey, AllocationResult>
+    val mainAllocation: Map<IntervalKey, AllocationResult>,
 )
 
 /**
@@ -232,7 +235,10 @@ fun collectMainIntervals(graph: CodeGraph): Map<IntervalKey, Interval> {
 /**
  * Apply resolved register allocations to tokens in a CodeGraph.
  */
-fun applyAllocationsToGraph(graph: CodeGraph, allocations: Map<IntervalKey, AllocationResult>) {
+fun applyAllocationsToGraph(
+    graph: CodeGraph,
+    allocations: Map<IntervalKey, AllocationResult>,
+) {
     graph.traverse { node ->
         if (node is CodeNode.CodeBlock) {
             for (line in node.lines) {
@@ -292,7 +298,7 @@ fun allocate(program: CodeGraph): AllocationReport {
  */
 private fun fillGraphStack(
     program: CodeGraph,
-    graphStack: MutableList<CodeNode.FunctionStart>
+    graphStack: MutableList<CodeNode.FunctionStart>,
 ) {
     program.traverse { node ->
         if (node is CodeNode.CallBlock) {
@@ -304,18 +310,18 @@ private fun fillGraphStack(
     }
 }
 
-fun peekToken(tokens: List<Token>, i: Int): Token? {
-    return if (i < tokens.size) {
+fun peekToken(
+    tokens: List<Token>,
+    i: Int,
+): Token? =
+    if (i < tokens.size) {
         tokens[i]
     } else {
         null
     }
-}
 
 /**
  * Return true if token is an argument literal for an instruction.
  * This is a signal that the token should be replaced with a register.
  */
-fun isArgument(token: Token): Boolean {
-    return token.type == TokenType.TOK_IDENT
-}
+fun isArgument(token: Token): Boolean = token.type == TokenType.TOK_IDENT

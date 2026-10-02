@@ -1,2 +1,8 @@
 package dev.secondsun.sfxoptimizer.graphbuilder;
-public class Dummy{}
+
+/**
+ * Placeholder class for packaging and documentation.
+ */
+public final class Dummy {
+    private Dummy() {}
+}

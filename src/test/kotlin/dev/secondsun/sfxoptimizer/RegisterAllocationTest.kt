@@ -7,10 +7,10 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import kotlin.test.Test
 
 class RegisterAllocationTest {
-
     @Test
     fun `test reciprocal`() {
-        val program = """
+        val program =
+            """
             ; In : R0 fixed88 the value to return the reciprocal of
             ; Out : R3 a fixed88 reciprocal
             function reciprocal in
@@ -49,7 +49,7 @@ class RegisterAllocationTest {
             
             stop
             
-        """.trimMargin()
+            """.trimMargin()
 
         val mainLine = program.lines().indexOfFirst { it.trim().startsWith("register toRecip") }
         val graph = graph(program, mainLine)
@@ -91,11 +91,24 @@ class RegisterAllocationTest {
         val keyB: IntervalKey = IntervalKey.LabelKey("b")
         val keyC: IntervalKey = IntervalKey.LabelKey("c")
 
-        val intervals: Map<IntervalKey, Interval> = mapOf(
-            keyA to Interval(keyA).apply { start = 1; end = 10 },
-            keyB to Interval(keyB).apply { start = 1; end = 10 },
-            keyC to Interval(keyC).apply { start = 1; end = 10 }
-        )
+        val intervals: Map<IntervalKey, Interval> =
+            mapOf(
+                keyA to
+                    Interval(keyA).apply {
+                        start = 1
+                        end = 10
+                    },
+                keyB to
+                    Interval(keyB).apply {
+                        start = 1
+                        end = 10
+                    },
+                keyC to
+                    Interval(keyC).apply {
+                        start = 1
+                        end = 10
+                    },
+            )
 
         // Only 2 registers available: R0, R1
         val allocator = GraphColoringAllocator(registerPool = listOf(Constants.Register.R0, Constants.Register.R1))

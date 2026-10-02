@@ -1,3 +1,8 @@
 package dev.secondsun.sfxoptimizer;
 
-public class Dummy{}
+/**
+ * Placeholder class for packaging and documentation.
+ */
+public final class Dummy {
+    private Dummy() {}
+}
