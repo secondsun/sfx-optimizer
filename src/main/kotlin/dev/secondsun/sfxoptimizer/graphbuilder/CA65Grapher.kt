@@ -54,7 +54,7 @@ class CA65Grapher(
         return programGraph
     }
 
-    private fun graphFunction(functionName: String): CodeNode.FunctionStart {
+    fun graphFunction(functionName: String): CodeNode.FunctionStart {
         val location = symbolService.getLocation(functionName)
 
         var lines = fileService.readLines(location.filename)

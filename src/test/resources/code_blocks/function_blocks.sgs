@@ -1,0 +1,14 @@
+; function blocks
+function somename 
+    register output = r6
+    from variable1
+    to output
+    add  #$5
+    return  
+endfunction
+
+register input = r5
+iwt input, #5
+call somename 
+stop
+

@@ -1,0 +1,4 @@
+; does a trivial code block generate a start, end, and code
+iwt r1 , #5 
+stw ( r1 ) 
+

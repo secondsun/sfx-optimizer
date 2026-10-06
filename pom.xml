@@ -226,7 +226,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.6.4</version>
                 <configuration>
-                    <mainClass>MainKt</mainClass>
+                    <mainClass>dev.secondsun.sfxoptimizer.viewer.MainKt</mainClass>
                 </configuration>
             </plugin>
             <plugin>

@@ -1,0 +1,19 @@
+; do conditional blocks make everything correctly
+iwt r0 , #5
+add #0
+
+label:
+beq next
+nop
+
+iwt r2 , #5
+stw ( r2 )
+
+next:
+iwt r3 , #5
+stw ( r3 )
+beq label
+nop
+
+stop
+

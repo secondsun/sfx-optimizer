@@ -1,0 +1,20 @@
+; basic test of graph register intervals
+function f1
+  iwt r2 , #5
+  return
+endfunction
+
+iwt r1 , #5 
+stw ( r1 ) 
+bra next
+nop
+
+iwt r1 , #5 
+stw ( r1 )
+
+next:
+iwt r1 , #5 
+stw ( r1 ) 
+
+call f1
+

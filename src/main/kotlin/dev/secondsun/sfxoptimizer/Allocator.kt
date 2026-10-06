@@ -278,7 +278,22 @@ fun allocate(program: CodeGraph): AllocationReport {
     val functionAllocations = mutableMapOf<String, Map<IntervalKey, AllocationResult>>()
     graphStack.asReversed().forEach { function ->
         val intervals = collectFunctionIntervals(function)
-        val interferenceGraph = allocator.buildInterferenceGraph(intervals)
+        val precolored = mutableMapOf<IntervalKey, Constants.Register>()
+        function.functionBody.traverse { node ->
+            if (node is CodeNode.CodeBlock) {
+                for (line in node.lines) {
+                    for (token in line.tokens) {
+                        if (token.hasAttribute(TokenAttribute.REGISTER_LABEL)) {
+                            val reg = token.getMetadata<Constants.Register>(TokenAttribute.REGISTER_LABEL)
+                            if (reg != null) {
+                                precolored[IntervalKey.LabelKey(token.text())] = reg
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val interferenceGraph = allocator.buildInterferenceGraph(intervals, precolored)
         val allocations = allocator.allocate(interferenceGraph)
         applyAllocationsToGraph(function.functionBody, allocations)
         functionAllocations[function.functionName] = allocations
@@ -286,7 +301,22 @@ fun allocate(program: CodeGraph): AllocationReport {
 
     // 3. Allocate main body locals
     val mainIntervals = collectMainIntervals(program)
-    val mainInterference = allocator.buildInterferenceGraph(mainIntervals)
+    val mainPrecolored = mutableMapOf<IntervalKey, Constants.Register>()
+    program.traverse { node ->
+        if (node is CodeNode.CodeBlock) {
+            for (line in node.lines) {
+                for (token in line.tokens) {
+                    if (token.hasAttribute(TokenAttribute.REGISTER_LABEL)) {
+                        val reg = token.getMetadata<Constants.Register>(TokenAttribute.REGISTER_LABEL)
+                        if (reg != null) {
+                            mainPrecolored[IntervalKey.LabelKey(token.text())] = reg
+                        }
+                    }
+                }
+            }
+        }
+    }
+    val mainInterference = allocator.buildInterferenceGraph(mainIntervals, mainPrecolored)
     val mainAllocations = allocator.allocate(mainInterference)
     applyAllocationsToGraph(program, mainAllocations)
 

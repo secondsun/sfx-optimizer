@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SuperFX Code & Liveness Viewer</title>
+    <link rel="stylesheet" href="/viewer.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-left">
+            <div class="logo">
+                <span class="logo-chip">SFX</span>
+                <span class="logo-text">Optimizer Viewer</span>
+            </div>
+            <div class="file-control">
+                <label for="fileSelect" class="control-label">File:</label>
+                <select id="fileSelect" class="select-input">
+                    <option value="">Loading files...</option>
+                </select>
+                <button id="refreshBtn" class="btn" title="Reload active file">↻ Reload</button>
+            </div>
+            <div class="scope-control">
+                <label for="scopeSelect" class="control-label">Scope:</label>
+                <select id="scopeSelect" class="select-input select-scope">
+                    <option value="all">All Scopes (Whole File)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="header-center">
+            <div class="mode-toggle">
+                <button id="modePreBtn" class="toggle-btn active" title="View source virtual registers and labels">Pre-Allocation Liveness</button>
+                <button id="modePostBtn" class="toggle-btn" title="View hardware register coloring & spills">Post-Allocation Registers</button>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div id="statsBadge" class="stats-badge">
+                <span id="intervalCount">0</span> intervals | 
+                <span id="regCount">0</span> registers
+            </div>
+            <div id="pinStatus" class="pin-status hidden">
+                <span class="pin-icon">📌</span>
+                <span id="pinText">Pinned: none</span>
+                <button id="unpinBtn" class="unpin-btn" title="Unpin (Esc)">✕</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="viewer-container">
+        <!-- Dual Pane Split -->
+        <div class="split-wrapper" id="splitWrapper">
+            <!-- Left Pane: Source Code -->
+            <div class="code-pane" id="codePane">
+                <div class="pane-header code-header">
+                    <span class="pane-title" id="codePaneTitle">Source Code</span>
+                    <span id="codeScopeBadge" class="scope-badge">All Scopes</span>
+                </div>
+                <div class="code-content" id="codeContent">
+                    <!-- Lines injected dynamically -->
+                    <div class="placeholder-msg">Loading assembly source...</div>
+                </div>
+            </div>
+
+            <!-- Right Pane: Liveness Swimlanes -->
+            <div class="swimlane-pane" id="swimlanePane">
+                <div class="pane-header swimlane-header-row" id="swimlaneHeaders">
+                    <!-- Column headers injected dynamically -->
+                </div>
+                <div class="swimlane-body" id="swimlaneBody">
+                    <!-- Column tracks and interval bars injected dynamically -->
+                </div>
+            </div>
+
+            <!-- Dynamic SVG Overlay for Bezier connections -->
+            <svg class="connections-overlay" id="svgOverlay">
+                <defs>
+                    <linearGradient id="curveGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#10b981" stop-opacity="0.9" />
+                        <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.9" />
+                    </linearGradient>
+                    <marker id="arrowHead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                        <polygon points="0 0, 6 3, 0 6" fill="#06b6d4" />
+                    </marker>
+                </defs>
+                <g id="svgPathsGroup"></g>
+            </svg>
+
+            <!-- Floating Details Tooltip -->
+            <div id="infoTooltip" class="info-tooltip hidden">
+                <div class="tooltip-header">
+                    <div class="tooltip-header-left">
+                        <span id="ttVarName" class="tooltip-title">r1</span>
+                        <span id="ttBadge" class="tooltip-badge">Register</span>
+                    </div>
+                    <button id="ttCloseBtn" class="tooltip-close-btn" title="Close hover box" aria-label="Close hover box">✕</button>
+                </div>
+                <div class="tooltip-body">
+                    <div class="tt-row" id="ttScopeRow">
+                        <span class="tt-lbl">Function Scope:</span>
+                        <span id="ttScope" class="tt-val">vector3_copy</span>
+                    </div>
+                    <div class="tt-row">
+                        <span class="tt-lbl">Live Range:</span>
+                        <span id="ttSpan" class="tt-val">Lines 1 - 5</span>
+                    </div>
+                    <div class="tt-row" id="ttAllocRow">
+                        <span class="tt-lbl">Hardware Reg:</span>
+                        <span id="ttAlloc" class="tt-val highlight">R1</span>
+                    </div>
+                    <div class="tt-row">
+                        <span class="tt-lbl">Defs (Writes):</span>
+                        <span id="ttWrites" class="tt-val">Line 1</span>
+                    </div>
+                    <div class="tt-row">
+                        <span class="tt-lbl">Uses (Reads):</span>
+                        <span id="ttReads" class="tt-val">Lines 3, 5</span>
+                    </div>
+                    <div class="tt-row">
+                        <span class="tt-lbl">Interferes:</span>
+                        <span id="ttInterferes" class="tt-val">r2, r3</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/viewer.js"></script>
+</body>
+</html>

@@ -51,6 +51,8 @@ sealed class CodeNode {
         fun intervals(key: IntervalKey): Interval? {
             var min = Int.MAX_VALUE
             var max = Int.MIN_VALUE
+            val reads = mutableSetOf<Int>()
+            val writes = mutableSetOf<Int>()
 
             traverse { codeNode ->
                 when (codeNode) {
@@ -63,6 +65,8 @@ sealed class CodeNode {
                             if (interval.end > max) {
                                 max = interval.end
                             }
+                            reads.addAll(interval.reads)
+                            writes.addAll(interval.writes)
                         }
                     }
                     is CallBlock -> {
@@ -80,6 +84,7 @@ sealed class CodeNode {
                                     if (codeNode.line < min) {
                                         min = codeNode.line
                                     }
+                                    reads.add(codeNode.line)
                                 }
 
                                 // add all registers passed as params
@@ -95,6 +100,7 @@ sealed class CodeNode {
                                             if (codeNode.line < min) {
                                                 min = codeNode.line
                                             }
+                                            reads.add(codeNode.line)
                                         })
                                 }
                             }
@@ -111,6 +117,7 @@ sealed class CodeNode {
                                             if (codeNode.line < min) {
                                                 min = codeNode.line
                                             }
+                                            reads.add(codeNode.line)
                                         })
                                 }
                             }
@@ -126,6 +133,8 @@ sealed class CodeNode {
                 return Interval(key).apply {
                     start = min
                     end = max
+                    reads.forEach { addRead(it) }
+                    writes.forEach { addWrite(it) }
                 }
             }
         }

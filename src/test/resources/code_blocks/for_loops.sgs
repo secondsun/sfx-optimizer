@@ -1,0 +1,10 @@
+; test for loops
+iwt r8, #$12
+for 5
+    from r8
+    to r5
+    add #$2
+endfor
+
+stw (r8)
+

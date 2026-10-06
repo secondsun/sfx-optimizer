@@ -1,0 +1,5 @@
+; defining a variable creates register and label intervals
+register l1 = r1
+iwt l1, #$12
+stw ( l1 )
+

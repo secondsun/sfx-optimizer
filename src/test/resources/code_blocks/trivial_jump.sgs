@@ -1,0 +1,13 @@
+; does a trivial jump generate 4 code nodes
+iwt r1 , #5 
+stw ( r1 ) 
+bra next
+nop
+
+iwt r2 , #5 
+stw ( r2 )
+
+next:
+iwt r3 , #5 
+stw ( r3 ) 
+

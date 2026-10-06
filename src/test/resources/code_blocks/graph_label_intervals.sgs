@@ -1,0 +1,22 @@
+; basic test of graph label intervals
+function f1 param1
+  iwt param1, #5
+  return
+endfunction
+
+register test
+
+iwt test , #5 
+stw ( test ) 
+bra next
+nop
+
+iwt test , #5 
+stw ( test )
+
+next:
+iwt test , #5 
+stw ( test ) 
+
+call f1 test
+

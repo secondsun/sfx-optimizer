@@ -1,0 +1,9 @@
+; split code node when it is jumped into midway
+iwt r0 , #5
+
+label:
+beq label
+nop
+
+stop
+

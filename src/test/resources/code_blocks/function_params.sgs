@@ -1,0 +1,9 @@
+; function params are registerLabels
+function test_function param1
+  iwt param1, #5
+  iwt r3, #6
+  return
+endfunction
+
+call test_function r2
+

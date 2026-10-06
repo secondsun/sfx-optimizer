@@ -1,0 +1,6 @@
+; test label interval
+register input 
+
+iwt input, #$5
+stw (input)
+

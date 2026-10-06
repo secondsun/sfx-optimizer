@@ -1,0 +1,14 @@
+; test nested for loops
+register count = r8
+iwt count, #$12
+forR count
+    from count
+    for 5
+      iwt r6, #0
+    endfor
+    to r5
+    add #$2
+endfor
+
+stop
+

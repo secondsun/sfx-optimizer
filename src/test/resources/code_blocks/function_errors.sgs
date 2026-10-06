@@ -1,0 +1,17 @@
+; function errors
+function test_funct_bad_param param 1
+  nop
+  return
+endfunction
+
+function test_funct param1
+  nop
+  return
+endfunction
+
+register param1
+call test_funct param1
+call test_funct 
+call test_funct param2
+call test_funct_bad_param param1
+

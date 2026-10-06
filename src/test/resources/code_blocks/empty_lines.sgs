@@ -1,0 +1,5 @@
+; code nodes must include empty lines
+iwt r4, #$5
+
+iwt r6,#$9
+

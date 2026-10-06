@@ -1,0 +1,8 @@
+; handle sreg and dreg
+iwt r5, #$7FFF
+with r5
+asr
+asr
+asr
+asr
+

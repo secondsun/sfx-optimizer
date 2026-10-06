@@ -1,0 +1,11 @@
+; test forr loops
+register count = r8
+iwt count, #$12
+forR count
+    from count
+    to r5
+    add #$2
+endfor
+
+stop
+
