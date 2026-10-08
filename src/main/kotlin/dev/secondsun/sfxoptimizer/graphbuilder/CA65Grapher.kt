@@ -1,6 +1,7 @@
 package dev.secondsun.sfxoptimizer.graphbuilder
 
 import dev.secondsun.retro.util.FileService
+import dev.secondsun.retro.util.FunctionSyntaxHelper
 import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenAttribute
@@ -39,7 +40,7 @@ class CA65Grapher(
 
     fun graph(
         file: TokenizedFile,
-        line: Int,
+        line: Int = 0,
     ): CodeGraph {
         val mainNode = makeNode(file, line)
         val start = CodeNode.Start(mainNode)
@@ -59,15 +60,17 @@ class CA65Grapher(
 
         var lines = fileService.readLines(location.filename)
 
-        val functionLine = lines.getLineTokens(location.line)
-        val params = functionLine.subList(2, functionLine.size)
-        params.forEach { param ->
-            if (param.type != TokenType.TOK_IDENT) {
-                param.addAttribute(TokenAttribute.ERROR)
-                param.message = "invalid param"
-            }
+        val functionLine = lines.getLine(location.line)
+        val funcDecl = FunctionSyntaxHelper.parseFunction(functionLine)
+        val params = funcDecl.parameters()
+        val returnVar = funcDecl.returnVariable().orElse(null)
+
+        val registerLabels = params.map { RegisterLabel(it.text()) }.toMutableSet()
+        if (returnVar != null && !Constants.isRegister(returnVar.text())) {
+            registerLabels.add(RegisterLabel(returnVar.text()))
         }
-        val mainNode = makeNode(lines, location.line + 1, registerLabels = params.map { RegisterLabel(it.text()) }.toMutableSet())
+
+        val mainNode = makeNode(lines, location.line + 1, registerLabels = registerLabels)
         val start = CodeNode.Start(mainNode)
         val functionBody = CodeGraph(start)
         functionBody.traverse { node ->
@@ -77,7 +80,7 @@ class CA65Grapher(
             }
         }
 
-        val functionNode = CodeNode.FunctionStart(functionName, location, functionBody, params)
+        val functionNode = CodeNode.FunctionStart(functionName, location, functionBody, params, returnVar)
         return functionNode
     }
 
@@ -230,13 +233,27 @@ class CA65Grapher(
                     code.addLine(tokens)
                     tokens[0].addAttribute(TokenAttribute.ERROR)
                     tokens[0].message = "Unexpected endfor"
-                } else if (isReturnOrEndFunction(tokens)) { // handle return
+                } else if (isReturnOrEndFunction(tokens)) { // handle return or endfunction
+                    if (FunctionSyntaxHelper.isReturn(tokens)) {
+                        val returnStmt = FunctionSyntaxHelper.parseReturn(tokens)
+                        returnStmt.returnVariable().ifPresent { retVar ->
+                            code.addRead(retVar)
+                        }
+                    }
                     code.addLine(tokens)
                     code.addExit(CodeNode.End)
                     break
                 } else if (isCall(tokens)) {
-                    val functionNode = graphFunction(tokens.tokens[1].text().trim())
-                    val callBlock = CodeNode.CallBlock(functionNode, tokens.tokens[0].lineNumber, tokens)
+                    val callStmt = FunctionSyntaxHelper.parseCall(tokens)
+                    val functionNode = graphFunction(callStmt.targetName())
+                    val callBlock =
+                        CodeNode.CallBlock(
+                            function = functionNode,
+                            line = tokens.tokens[0].lineNumber,
+                            tokens = tokens,
+                            destinationVariable = callStmt.destinationVariable().orElse(null),
+                            arguments = callStmt.arguments(),
+                        )
 
                     checkFunctionTypesMatchAndCreateIntervals(callBlock, functionNode, tokens, registerLabels)
                     code.addExit(callBlock)
@@ -775,21 +792,28 @@ class CA65Grapher(
         callBlockTokens: Tokens,
         registerLabels: MutableSet<RegisterLabel>,
     ) {
-        if (callBlockTokens.tokens.size == 2) {
-            if (functionNode.params.size != 0) {
-                callBlockTokens.tokens[0].addAttribute(TokenAttribute.ERROR)
-                callBlockTokens.tokens[0].message = "${functionNode.functionName} requires ${functionNode.params.size} parameters"
+        val callStmt = FunctionSyntaxHelper.parseCall(callBlockTokens)
+        if (callStmt.hasErrors()) {
+            return
+        }
+        val args = callStmt.arguments()
+        if (args.size != functionNode.params.size) {
+            callStmt.callToken().addAttribute(TokenAttribute.ERROR)
+            callStmt.callToken().message = "${functionNode.functionName} requires ${functionNode.params.size} parameters"
+        } else {
+            args.forEach { param ->
+                if (!Constants.isRegister(param.text()) && !registerLabels.contains(RegisterLabel(param.text()))) {
+                    param.addAttribute(TokenAttribute.ERROR)
+                    param.message = "undeclared param"
+                }
             }
-        } else { // /handle params intervals
-            val params = callBlockTokens.tokens.subList(2, callBlockTokens.tokens.size)
-            params.forEach(
-                { param ->
-                    if (!registerLabels.contains(RegisterLabel(param.text()))) {
-                        param.addAttribute(TokenAttribute.ERROR)
-                        param.message = "undeclared param"
-                    }
-                },
-            )
+        }
+
+        callStmt.destinationVariable().ifPresent { dest ->
+            if (!Constants.isRegister(dest.text()) && !registerLabels.contains(RegisterLabel(dest.text()))) {
+                dest.addAttribute(TokenAttribute.ERROR)
+                dest.message = "undeclared param"
+            }
         }
     }
 
@@ -841,29 +865,21 @@ class CA65Grapher(
     }
 
     private fun isCall(tokens: Tokens): Boolean {
-        if (tokens.tokens.size < 2 ||
-            !tokens.tokens[0]
-                .text()
-                .trim()
-                .lowercase()
-                .equals("call")
-        ) {
+        if (!FunctionSyntaxHelper.isCall(tokens)) {
             return false
         }
 
-        val functionLocation = this.symbolService.getLocation(tokens[1].text())
+        val callStmt = FunctionSyntaxHelper.parseCall(tokens)
+        val targetName = callStmt.targetName()
+        if (targetName.isBlank()) {
+            return false
+        }
 
-        val isCall =
-            tokens.tokens[0]
-                .text()
-                .trim()
-                .lowercase()
-                .equals("call") &&
-                (functionLocation != null)
-        if (isCall) {
+        val functionLocation = this.symbolService.getLocation(targetName)
+        if (functionLocation != null) {
             return true
         } else {
-            tokens[1].apply {
+            callStmt.targetToken().apply {
                 addAttribute(TokenAttribute.ERROR)
                 message = "${text()} is not a function name"
             }
@@ -871,14 +887,8 @@ class CA65Grapher(
         }
     }
 
-    private fun isReturnOrEndFunction(tokens: Tokens): Boolean {
-        val tokensList = tokens.tokens
-        if (tokensList.size != 1) {
-            return false
-        }
-        val token = tokens[0].text().trim().lowercase()
-        return token.equals("endfunction") || token.equals("return")
-    }
+    private fun isReturnOrEndFunction(tokens: Tokens): Boolean =
+        FunctionSyntaxHelper.isReturn(tokens) || FunctionSyntaxHelper.isEndFunction(tokens)
 
     private fun useSreg(
         code: CodeNode.CodeBlock,

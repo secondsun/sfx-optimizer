@@ -91,4 +91,6 @@ class CodeGraph(
     ) {
         functions[functionName] = node
     }
+
+    val allFunctions: Map<String, CodeNode.FunctionStart> get() = functions
 }

@@ -88,37 +88,72 @@ sealed class CodeNode {
                                 }
 
                                 // add all registers passed as params
-                                if (codeNode.tokens.tokens.size > 2) {
-                                    val params = codeNode.tokens.tokens.subList(2, codeNode.tokens.tokens.size)
-                                    params
-                                        .filter({ param -> Constants.isRegister(param.text()) })
-                                        .filter { param -> param.text().equals(key.register.label) }
-                                        .forEach({
-                                            if (codeNode.line > max) {
-                                                max = codeNode.line
-                                            }
-                                            if (codeNode.line < min) {
-                                                min = codeNode.line
-                                            }
-                                            reads.add(codeNode.line)
-                                        })
+                                val effectiveArgs =
+                                    if (codeNode.arguments.isNotEmpty()) {
+                                        codeNode.arguments
+                                    } else if (codeNode.tokens.tokens.size > 2) {
+                                        codeNode.tokens.tokens.subList(2, codeNode.tokens.tokens.size)
+                                    } else {
+                                        emptyList()
+                                    }
+                                effectiveArgs
+                                    .filter { param -> Constants.isRegister(param.text()) }
+                                    .filter { param -> param.text().equals(key.register.label, ignoreCase = true) }
+                                    .forEach {
+                                        if (codeNode.line > max) {
+                                            max = codeNode.line
+                                        }
+                                        if (codeNode.line < min) {
+                                            min = codeNode.line
+                                        }
+                                        reads.add(codeNode.line)
+                                    }
+
+                                if (codeNode.destinationVariable != null &&
+                                    Constants.isRegister(codeNode.destinationVariable.text()) &&
+                                    codeNode.destinationVariable.text().equals(key.register.label, ignoreCase = true)
+                                ) {
+                                    if (codeNode.line > max) {
+                                        max = codeNode.line
+                                    }
+                                    if (codeNode.line < min) {
+                                        min = codeNode.line
+                                    }
+                                    writes.add(codeNode.line)
                                 }
                             }
 
                             is IntervalKey.LabelKey -> {
-                                if (codeNode.tokens.tokens.size > 2) {
-                                    val params = codeNode.tokens.tokens.subList(2, codeNode.tokens.tokens.size)
-                                    params
-                                        .filter { param -> param.text().equals(key.label) }
-                                        .forEach({
-                                            if (codeNode.line > max) {
-                                                max = codeNode.line
-                                            }
-                                            if (codeNode.line < min) {
-                                                min = codeNode.line
-                                            }
-                                            reads.add(codeNode.line)
-                                        })
+                                val effectiveArgs =
+                                    if (codeNode.arguments.isNotEmpty()) {
+                                        codeNode.arguments
+                                    } else if (codeNode.tokens.tokens.size > 2) {
+                                        codeNode.tokens.tokens.subList(2, codeNode.tokens.tokens.size)
+                                    } else {
+                                        emptyList()
+                                    }
+                                effectiveArgs
+                                    .filter { param -> param.text().equals(key.label) }
+                                    .forEach {
+                                        if (codeNode.line > max) {
+                                            max = codeNode.line
+                                        }
+                                        if (codeNode.line < min) {
+                                            min = codeNode.line
+                                        }
+                                        reads.add(codeNode.line)
+                                    }
+
+                                if (codeNode.destinationVariable != null &&
+                                    codeNode.destinationVariable.text().equals(key.label)
+                                ) {
+                                    if (codeNode.line > max) {
+                                        max = codeNode.line
+                                    }
+                                    if (codeNode.line < min) {
+                                        min = codeNode.line
+                                    }
+                                    writes.add(codeNode.line)
                                 }
                             }
                         }
@@ -300,6 +335,8 @@ sealed class CodeNode {
         val function: FunctionStart,
         val line: Int,
         val tokens: Tokens,
+        val destinationVariable: Token? = null,
+        val arguments: List<Token> = emptyList(),
     ) : CodeNode()
 
     data class FunctionStart(
@@ -307,5 +344,6 @@ sealed class CodeNode {
         val location: Location,
         val functionBody: CodeGraph,
         val params: List<Token>,
+        val returnVariable: Token? = null,
     ) : CodeNode()
 }

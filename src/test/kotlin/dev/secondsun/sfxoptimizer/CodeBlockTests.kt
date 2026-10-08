@@ -251,7 +251,7 @@ class CodeBlockTests {
         assertEquals("undeclared param", call2.tokens.tokens[2].message)
 
         assertTrue(badFunction!!.params[1].hasAttribute(TokenAttribute.ERROR))
-        assertEquals("invalid param", badFunction.params[1].message)
+        assertEquals("Expected parameter identifier, found: 1", badFunction.params[1].message)
     }
 
     @Test
@@ -542,6 +542,52 @@ class CodeBlockTests {
         assertEquals(1, r5Interval.reads.size)
         assertEquals(3, block.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.start)
         assertEquals(5, block.intervals[IntervalKey.RegisterKey(Constants.Register.R0)]!!.end)
+    }
+
+    @Test
+    fun `test function with return and call with destination variable`() {
+        val program =
+            """
+            function compute_sum a, b : result
+                register result
+                to result
+                from a
+                add b
+                return result
+            endfunction
+
+            register x, y, z
+            iwt x, #10
+            iwt y, #20
+            call compute_sum x, y : z
+            stop
+            """.trimIndent()
+
+        val programGraph = graph(program, 8)
+        val functionNode = programGraph.getFunction("compute_sum")
+        assertNotNull(functionNode)
+        assertEquals("result", functionNode!!.returnVariable?.text())
+        assertEquals(2, functionNode.params.size)
+        assertEquals("a", functionNode.params[0].text())
+        assertEquals("b", functionNode.params[1].text())
+
+        // Check call block
+        var callBlock: CodeNode.CallBlock? = null
+        programGraph.traverse { node ->
+            if (node is CodeNode.CallBlock && node.function.functionName == "compute_sum") {
+                callBlock = node
+            }
+        }
+        assertNotNull(callBlock)
+        assertEquals("z", callBlock?.destinationVariable?.text())
+        assertEquals(2, callBlock?.arguments?.size)
+        assertEquals("x", callBlock?.arguments?.get(0)?.text())
+        assertEquals("y", callBlock?.arguments?.get(1)?.text())
+
+        // Check that z has a write at the call block line
+        val zInterval = programGraph.startNode.intervals(IntervalKey.LabelKey("z"))
+        assertNotNull(zInterval)
+        assertTrue(zInterval!!.writes.contains(callBlock!!.line))
     }
 }
 
