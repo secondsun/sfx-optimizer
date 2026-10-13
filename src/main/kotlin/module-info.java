@@ -9,6 +9,7 @@ open module dev.secondsun.sfxoptimizer {
     exports dev.secondsun.sfxoptimizer.graphbuilder;
     exports dev.secondsun.sfxoptimizer.graphnode;
     exports dev.secondsun.sfxoptimizer;
+    exports dev.secondsun.sfxoptimizer.compiler;
     exports dev.secondsun.sfxoptimizer.viewer;
 
 }

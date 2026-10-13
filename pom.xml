@@ -96,7 +96,7 @@
                         <phase>generate-resources</phase>
                         <configuration>
                             <includeScope>runtime</includeScope>
-                            <excludeTransitive>true</excludeTransitive>
+                            <excludeTransitive>false</excludeTransitive>
                         </configuration>
                     </execution>
                 </executions>
@@ -108,6 +108,7 @@
                 <configuration>
                     <archive>
                         <manifest>
+                            <mainClass>dev.secondsun.sfxoptimizer.viewer.MainKt</mainClass>
                             <addClasspath>true</addClasspath>
                             <classpathPrefix>dependency/</classpathPrefix>
                         </manifest>

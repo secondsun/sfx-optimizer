@@ -1,5 +1,6 @@
 package dev.secondsun.sfxoptimizer.viewer
 
+import dev.secondsun.sfxoptimizer.compiler.SfxCompiler
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -10,10 +11,31 @@ fun main(args: Array<String>) {
     var port = 8080
     var openBrowser = true
     var initialFile: String? = null
+    var compileInput: String? = null
+    var compileOutput: String? = null
+    val includeDirs = mutableListOf<File>()
 
     var i = 0
     while (i < args.size) {
         when (val arg = args[i]) {
+            "--compile", "-c" -> {
+                if (i + 1 < args.size) {
+                    compileInput = args[i + 1]
+                    i++
+                }
+            }
+            "--output", "-o" -> {
+                if (i + 1 < args.size) {
+                    compileOutput = args[i + 1]
+                    i++
+                }
+            }
+            "--include", "-I" -> {
+                if (i + 1 < args.size) {
+                    includeDirs.add(File(args[i + 1]))
+                    i++
+                }
+            }
             "--port", "-p" -> {
                 if (i + 1 < args.size) {
                     port = args[i + 1].toIntOrNull() ?: 8080
@@ -24,12 +46,32 @@ fun main(args: Array<String>) {
                 openBrowser = false
             }
             else -> {
-                if (!arg.startsWith("-")) {
+                if (arg.startsWith("-I") && arg.length > 2) {
+                    includeDirs.add(File(arg.substring(2)))
+                } else if (!arg.startsWith("-")) {
                     initialFile = arg
                 }
             }
         }
         i++
+    }
+
+    if (compileInput != null) {
+        val inFile = File(compileInput)
+        if (!inFile.exists()) {
+            System.err.println("Error: Input file not found: ${inFile.absolutePath}")
+            kotlin.system.exitProcess(1)
+        }
+        val compiler = SfxCompiler()
+        val result = compiler.compileFile(inFile, includeDirs)
+        if (compileOutput != null) {
+            val outFile = File(compileOutput)
+            outFile.parentFile?.mkdirs()
+            outFile.writeText(result.loweredSource)
+        } else {
+            println(result.loweredSource)
+        }
+        return
     }
 
     val server = ViewerServer(initialPort = port, workingDir = File("."))

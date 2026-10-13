@@ -357,7 +357,9 @@ class CodeAnalyzer {
             val tokens = tokenizedFile.getLineTokens(lineIdx) ?: continue
             for (tok in tokens) {
                 val lower = tok.text().lowercase(Locale.ROOT)
-                if (Constants.isRegister(lower) || tok.hasAttribute(TokenAttribute.REGISTER_LABEL) || lower == "register" ||
+                if (Constants.isRegister(lower) ||
+                    tok.hasAttribute(TokenAttribute.REGISTER_LABEL) ||
+                    lower == "register" ||
                     mainDeclaredRegisters.containsKey(lower)
                 ) {
                     nonFunctionRegisterLines.add(lineIdx)
@@ -738,11 +740,14 @@ class CodeAnalyzer {
                     pendingSource = null
                     pendingDest = null
                 }
-                "not", "div2", "lsr", "rol", "ror", "sex", "swap", "hib", "lob" -> {
+                "not", "div2", "lsr", "asr", "rol", "ror", "sex", "swap", "hib", "lob" -> {
                     useSource()
                     useDest()
                     pendingSource = null
                     pendingDest = null
+                }
+                "alt1", "alt2", "alt3" -> {
+                    // Preserves pendingSource and pendingDest
                 }
                 "merge" -> {
                     implicitReads.add(r7Key)
@@ -819,7 +824,7 @@ class CodeAnalyzer {
                     pendingSource = null
                     pendingDest = null
                 }
-                "inc", "dec" -> {
+                "inc", "dec", "shl" -> {
                     findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) ->
                         explicitReads[tok] = key
                         explicitWrites[tok] = key
@@ -829,6 +834,38 @@ class CodeAnalyzer {
                 }
                 "sm", "sms" -> {
                     findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) -> explicitReads[tok] = key }
+                    pendingSource = null
+                    pendingDest = null
+                }
+                "gsu_stack_pop", "gsu_stack_peek" -> {
+                    findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) -> explicitWrites[tok] = key }
+                    pendingSource = null
+                    pendingDest = null
+                }
+                "_romreadbyte", "_romreadword", "_romreadwordle" -> {
+                    findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) -> explicitWrites[tok] = key }
+                    implicitReads.add(r14Key)
+                    implicitWrites.add(r14Key)
+                    pendingSource = null
+                    pendingDest = null
+                }
+                "call" -> {
+                    var afterColon = false
+                    for (arg in args) {
+                        if (arg.text() == ":") {
+                            afterColon = true
+                            continue
+                        }
+                        val key = resolveKey(arg, declaredRegisters)
+                        if (key != null) {
+                            if (afterColon) {
+                                explicitWrites[arg] = key
+                            } else {
+                                explicitReads[arg] = key
+                            }
+                        }
+                    }
+                    implicitWrites.add(r11Key)
                     pendingSource = null
                     pendingDest = null
                 }
