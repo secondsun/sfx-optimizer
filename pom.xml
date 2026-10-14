@@ -6,7 +6,7 @@
 
     <artifactId>sfx-optimizer</artifactId>
     <groupId>dev.secondsun</groupId>
-    <version>0.3</version>
+    <version>0.4</version>
     <packaging>jar</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
@@ -34,7 +34,7 @@
         <connection>scm:git:git://github.com/secondsun/sfx-optimizer.git</connection>
         <developerConnection>scm:git:ssh://github.com:secondsun/sfx-optimizer.git</developerConnection>
         <url>http://github.com/secondsun/sfx-optimizer/tree/prototype</url>
-        <tag>sfx-optimizer-${project.version}}</tag>
+        <tag>v0.4</tag>
     </scm>
 
 
@@ -290,7 +290,7 @@
         <dependency>
             <groupId>dev.secondsun</groupId>
             <artifactId>retro-common</artifactId>
-            <version>1.5.0</version>
+            <version>1.6.0</version>
         </dependency>
 
         <dependency>
