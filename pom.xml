@@ -68,6 +68,7 @@
     </dependencyManagement>
 
     <build>
+        <finalName>sfx-optimizer</finalName>
         <pluginManagement>
             <plugins>
                 <plugin>
