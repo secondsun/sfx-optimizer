@@ -6,7 +6,7 @@
 
     <artifactId>sfx-optimizer</artifactId>
     <groupId>dev.secondsun</groupId>
-    <version>0.4</version>
+    <version>0.5.0</version>
     <packaging>jar</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
@@ -34,8 +34,16 @@
         <connection>scm:git:git://github.com/secondsun/sfx-optimizer.git</connection>
         <developerConnection>scm:git:ssh://github.com:secondsun/sfx-optimizer.git</developerConnection>
         <url>http://github.com/secondsun/sfx-optimizer/tree/prototype</url>
-        <tag>v0.4</tag>
+        <tag>v0.5.0</tag>
     </scm>
+
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/secondsun/sfx-optimizer</url>
+        </repository>
+    </distributionManagement>
 
 
     <properties>
@@ -52,6 +60,14 @@
         <repository>
             <id>mavenCentral</id>
             <url>https://repo1.maven.org/maven2/</url>
+        </repository>
+        <repository>
+            <id>github-retro-common</id>
+            <name>GitHub Packages retro-common</name>
+            <url>https://maven.pkg.github.com/secondsun/retro-common</url>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
         </repository>
     </repositories>
 
@@ -148,16 +164,6 @@
 
                     </execution>
                 </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.sonatype.central</groupId>
-                <artifactId>central-publishing-maven-plugin</artifactId>
-                <version>0.11.0</version>
-                <extensions>true</extensions>
-                <configuration>
-                    <publishingServerId>central</publishingServerId>
-                    <autoPublish>true</autoPublish>
-                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -291,7 +297,7 @@
         <dependency>
             <groupId>dev.secondsun</groupId>
             <artifactId>retro-common</artifactId>
-            <version>1.6.0</version>
+            <version>1.7.0</version>
         </dependency>
 
         <dependency>
