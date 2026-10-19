@@ -12,9 +12,13 @@ import dev.secondsun.retro.util.vo.Location
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.retro.util.vo.Tokens
 import dev.secondsun.sfxoptimizer.Constants
+import dev.secondsun.sfxoptimizer.IntervalKey
+import dev.secondsun.sfxoptimizer.analysis.DeclaredRegister
+import dev.secondsun.sfxoptimizer.analysis.SfxLivenessAnalyzer
 import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
 import dev.secondsun.sfxoptimizer.graphnode.CodeNode
 import java.net.URI
+import java.util.Locale
 
 typealias FileName = URI
 typealias LineNumber = Int
@@ -278,373 +282,63 @@ class CA65Grapher(
                         checkAndApplyRegisterLabelAttribute(tokens, registerLabels)
                         val instruction = Instructions.entries.find { it.instruction.matches(tokens) }
                         if (instruction != null) {
-                            when (instruction) {
-                                Instructions.FROM -> {
-                                    sReg = (tokens[1])
+                            val mnemonic = firstToken.text().lowercase(Locale.ROOT)
+                            when (mnemonic) {
+                                "from" -> {
+                                    sReg = tokens[1]
                                 }
-                                Instructions.TO -> {
-                                    dReg = (tokens[1])
+                                "to" -> {
+                                    dReg = tokens[1]
                                 }
-                                Instructions.WITH -> {
-                                    sReg = (tokens[1])
-                                    dReg = (tokens[1])
+                                "with" -> {
+                                    sReg = tokens[1]
+                                    dReg = tokens[1]
                                 }
-                                Instructions.JMP -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addRead(tokens[1])
+                                "alt1", "alt2", "alt3" -> {
+                                    // Preserves pending modal registers
                                 }
-                                Instructions.LJMP -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.BRA -> {}
-                                Instructions.IWT_JUMP -> {
-                                    sReg = null
-                                    dReg = null
-                                }
-                                Instructions.ADC_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.ADC_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.ADD_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.ADD_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.ALT1 -> {}
-                                Instructions.ALT2 -> {}
-                                Instructions.ALT3 -> {}
-                                Instructions.AND_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.AND_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.ASR -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.BCC -> {}
-                                Instructions.BCS -> {}
-                                Instructions.BEQ -> {}
-                                Instructions.BGE -> {}
-                                Instructions.BIC_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.BIC_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.BLT -> {}
-                                Instructions.BMI -> {}
-                                Instructions.BNE -> {}
-                                Instructions.BPL -> {}
-                                Instructions.BVC -> {}
-                                Instructions.BVS -> {}
-                                Instructions.CACHE -> {
-                                    sReg = null
-                                    dReg = null
-                                }
-                                Instructions.CMODE -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    dReg = null
-                                }
-                                Instructions.CMP -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    dReg = null
-                                }
-                                Instructions.COLOR -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    dReg = null
-                                }
-                                Instructions.DEC -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addRead(tokens[1])
-                                    code.addWrite(tokens[1])
-                                }
-                                Instructions.DIV2 -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.FMULT -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(
-                                        Constants.Register.R6,
-                                        firstToken.lineNumber,
-                                    )
-                                }
+                                else -> {
+                                    val declaredMap =
+                                        registerLabels.associate {
+                                            it.label.lowercase(Locale.ROOT) to
+                                                DeclaredRegister(it.label, it.register, firstToken.lineNumber)
+                                        }
+                                    val sKey = sReg?.let { SfxLivenessAnalyzer.resolveKey(it, declaredMap) }
+                                    val dKey = dReg?.let { SfxLivenessAnalyzer.resolveKey(it, declaredMap) }
+                                    val effect =
+                                        SfxLivenessAnalyzer.evaluateLineEffect(
+                                            tokens = tokens.tokens,
+                                            currentPendingSource = sKey,
+                                            currentPendingDest = dKey,
+                                            declaredRegisters = declaredMap,
+                                            lineIdx = firstToken.lineNumber,
+                                        )
 
-                                Instructions.GETB -> {
-                                    sReg = null
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(
-                                        Constants.Register.R14,
-                                        firstToken.lineNumber,
-                                    )
-                                }
-                                Instructions.GETBH -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(
-                                        Constants.Register.R14,
-                                        firstToken.lineNumber,
-                                    )
-                                }
-                                Instructions.GETBL -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(
-                                        Constants.Register.R14,
-                                        firstToken.lineNumber,
-                                    )
-                                }
-                                Instructions.GETBS -> {
-                                    sReg = null
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(
-                                        Constants.Register.R14,
-                                        firstToken.lineNumber,
-                                    )
-                                }
-                                Instructions.GETC -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addRead(Constants.Register.R14, firstToken.lineNumber)
-                                }
-                                Instructions.HIB -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.IBT -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addWrite(tokens[1])
-                                }
-                                Instructions.INC -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addRead(tokens[1])
-                                    code.addWrite(tokens[1])
-                                }
-                                Instructions.IWT -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addWrite(tokens[1])
-                                }
-                                Instructions.LDB -> {
-                                    sReg = null
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[2])
-                                }
-                                Instructions.LDW -> {
-                                    sReg = null
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[2])
-                                }
-                                Instructions.LINK -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addWrite(Constants.Register.R11, firstToken.lineNumber)
-                                }
-                                Instructions.LM -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addWrite(tokens[1])
-                                }
-                                Instructions.LMS -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addWrite(tokens[1])
-                                }
-                                Instructions.LMULT -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(
-                                        Constants.Register.R6,
-                                        firstToken.lineNumber,
-                                    )
-                                    code.addWrite(Constants.Register.R4, firstToken.lineNumber)
-                                }
-                                Instructions.LOB -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.LOOP -> {
-                                    code.addRead(Constants.Register.R13, firstToken.lineNumber)
-                                    code.addWrite(
-                                        Constants.Register.R12,
-                                        firstToken.lineNumber,
-                                    )
-                                }
-                                Instructions.LSR -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.MERGE -> {
-                                    useDreg(code, firstToken.lineNumber)
-                                    sReg = null
-                                    code.addRead(
-                                        Constants.Register.R7,
-                                        firstToken.lineNumber,
-                                    )
-                                    code.addRead(Constants.Register.R8, firstToken.lineNumber)
-                                }
-                                Instructions.MOVE -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addWrite(tokens[1])
-                                    code.addRead(tokens[3])
-                                }
-                                Instructions.MOVES -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addWrite(tokens[1])
-                                }
-                                Instructions.MULT_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.MULT_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.NOP -> {
-                                    sReg = null
-                                    dReg = null
-                                }
-                                Instructions.NOT -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.OR_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.OR_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.PLOT -> {
-                                    code.addRead(Constants.Register.R1, firstToken.lineNumber)
-                                    code.addRead(
-                                        Constants.Register.R2,
-                                        firstToken.lineNumber,
-                                    )
-                                }
-                                Instructions.RAMB -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    dReg = null
-                                }
-                                Instructions.ROL -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.ROMB -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    dReg = null
-                                }
-                                Instructions.ROR -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.RPIX -> {
-                                    sReg = null
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(
-                                        Constants.Register.R2,
-                                        firstToken.lineNumber,
-                                    )
-                                    code.addRead(Constants.Register.R1, firstToken.lineNumber)
-                                }
-                                Instructions.SBC -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.SBK -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    dReg = null
-                                }
-                                Instructions.SEX -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.SM -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addRead(tokens[5])
-                                }
-                                Instructions.SMS -> {
-                                    sReg = null
-                                    dReg = null
-                                    code.addRead(tokens[2])
-                                }
-                                Instructions.STB -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    dReg = null
-                                    code.addRead(tokens[2])
-                                }
-                                Instructions.STOP -> {
-                                    sReg = null
-                                    dReg = null
-                                }
-                                Instructions.STW -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    dReg = null
-                                    code.addRead(tokens[2])
-                                }
-                                Instructions.SUB_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.SUB_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
-                                Instructions.SWAP -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
+                                    val r0Key = IntervalKey.RegisterKey(Constants.Register.R0)
+                                    if (effect.implicitReads.contains(sKey ?: r0Key)) {
+                                        useSreg(code, firstToken.lineNumber)
+                                    } else if (effect.nextPendingSource == null) {
+                                        sReg = null
+                                    }
 
-                                Instructions.UMULT_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.UMULT_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                }
+                                    if (effect.implicitWrites.contains(dKey ?: r0Key)) {
+                                        useDreg(code, firstToken.lineNumber)
+                                    } else if (effect.nextPendingDest == null) {
+                                        dReg = null
+                                    }
 
-                                Instructions.XOR_REGISTER -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
-                                    code.addRead(tokens[1])
-                                }
-                                Instructions.XOR_CONST -> {
-                                    useSreg(code, firstToken.lineNumber)
-                                    useDreg(code, firstToken.lineNumber)
+                                    effect.explicitReads.forEach { (tok, _) -> code.addRead(tok) }
+                                    effect.explicitWrites.forEach { (tok, _) -> code.addWrite(tok) }
+                                    effect.implicitReads.forEach { key ->
+                                        if (key is IntervalKey.RegisterKey && key != sKey) {
+                                            code.addRead(key.register, firstToken.lineNumber)
+                                        }
+                                    }
+                                    effect.implicitWrites.forEach { key ->
+                                        if (key is IntervalKey.RegisterKey && key != dKey) {
+                                            code.addWrite(key.register, firstToken.lineNumber)
+                                        }
+                                    }
                                 }
                             }
                         } else {

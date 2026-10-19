@@ -1,8 +1,15 @@
 package dev.secondsun.sfxoptimizer.stack
 
+import dev.secondsun.retro.util.FileService
+import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.Token
+import dev.secondsun.retro.util.WorkspaceIndex
+import dev.secondsun.retro.util.diagnostic.SyntaxDiagnostic
+import dev.secondsun.retro.util.vo.TokenizedFile
+import dev.secondsun.sfxoptimizer.graphbuilder.CA65Grapher
 import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
 import dev.secondsun.sfxoptimizer.graphnode.CodeNode
+import dev.secondsun.sfxoptimizer.macro.CA65MacroExpander
 import kotlin.math.max
 
 /**
@@ -74,6 +81,84 @@ class StackDepthTracker {
             violations.addAll(track(func, strict = false).violations)
         }
         return violations
+    }
+
+    /**
+     * Audits a source [tokenizedFile] directly for stack displacement invariants, encapsulating
+     * macro expansion, CFG construction, and function traversal behind one deep interface.
+     */
+    fun auditFile(
+        tokenizedFile: TokenizedFile,
+        workspaceIndex: WorkspaceIndex? = null,
+        fileService: FileService = workspaceIndex?.fileService ?: FileService(),
+        symbolService: SymbolService = workspaceIndex?.symbolService ?: SymbolService(),
+    ): List<SyntaxDiagnostic> {
+        val expander = CA65MacroExpander(fileService)
+        val expanded = expander.expand(tokenizedFile)
+        val effectiveUri = expanded.uri ?: tokenizedFile.uri ?: java.net.URI.create("snippet:///inline.s")
+        expanded.uri = effectiveUri
+
+        val effectiveFileService =
+            object : FileService() {
+                override fun readLines(targetUri: java.net.URI?): TokenizedFile {
+                    if (targetUri != null && targetUri == effectiveUri) {
+                        return expanded
+                    }
+                    if (workspaceIndex != null && targetUri != null) {
+                        val f = workspaceIndex.getFileContents(targetUri)
+                        if (f != null && !f.isEmpty) {
+                            return f
+                        }
+                    }
+                    return try {
+                        fileService.readLines(targetUri)
+                    } catch (e: Exception) {
+                        TokenizedFile.EMPTY
+                    }
+                }
+            }
+
+        val effectiveSymbolService = SymbolService()
+        effectiveSymbolService.extractDefinitions(expanded)
+
+        val grapher = CA65Grapher(effectiveSymbolService, effectiveFileService)
+        val graph = grapher.graph(expanded, 0)
+
+        val violations = mutableListOf<StackViolation>()
+        violations.addAll(auditStack(graph))
+
+        // Ensure any functions defined in the expanded lines are audited
+        for (i in 0 until expanded.textLines()) {
+            val lineToks = expanded.getLine(i)
+            if (lineToks != null && lineToks.tokens.isNotEmpty()) {
+                val first = lineToks.tokens[0]
+                if (first.type == dev.secondsun.retro.util.TokenType.TOK_FUNCTION ||
+                    "function".equals(first.text(), ignoreCase = true)
+                ) {
+                    if (lineToks.tokens.size >= 2) {
+                        val fnName = lineToks.tokens[1].text()
+                        try {
+                            val fnNode = grapher.graphFunction(fnName)
+                            if (fnNode != null) {
+                                violations.addAll(track(fnNode, strict = false).violations)
+                            }
+                        } catch (_: Throwable) {
+                        }
+                    }
+                }
+            }
+        }
+
+        return violations.map { sv ->
+            SyntaxDiagnostic.error(
+                effectiveUri,
+                maxOf(1, sv.line),
+                0,
+                1,
+                sv.rule,
+                sv.message,
+            )
+        }
     }
 
     /**

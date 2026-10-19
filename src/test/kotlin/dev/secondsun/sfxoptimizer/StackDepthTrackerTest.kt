@@ -213,4 +213,23 @@ class StackDepthTrackerTest {
         val v = violations[0]
         assertEquals("DIVERGENT_STACK_DEPTH", v.rule)
     }
+
+    @Test
+    fun `test auditFile detects stack leak directly from raw source tokens`() {
+        val program =
+            """
+            function leaking_function
+                gsu_stack_push r4
+                return
+            endfunction
+            """.trimIndent()
+
+        val tokenized = CA65Scanner().tokenize(program)
+        val diagnostics = tracker.auditFile(tokenized)
+
+        assertEquals(1, diagnostics.size)
+        val diag = diagnostics[0]
+        assertEquals("STACK_LEAK_ON_RETURN", diag.code())
+        assertTrue(diag.message().contains("Δ_SP = 2 bytes"))
+    }
 }

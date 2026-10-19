@@ -11,6 +11,7 @@ open module dev.secondsun.sfxoptimizer {
     exports dev.secondsun.sfxoptimizer;
     exports dev.secondsun.sfxoptimizer.compiler;
     exports dev.secondsun.sfxoptimizer.viewer;
+    exports dev.secondsun.sfxoptimizer.analysis;
     exports dev.secondsun.sfxoptimizer.macro;
     exports dev.secondsun.sfxoptimizer.solver;
     exports dev.secondsun.sfxoptimizer.stack;

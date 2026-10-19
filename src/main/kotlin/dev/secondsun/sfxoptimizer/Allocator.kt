@@ -62,13 +62,45 @@ data class InterferenceGraph(
 }
 
 /**
- * Graph-Coloring Register Allocator using the Chaitin-Briggs / Kempe heuristic.
+ * Graph-Coloring Register Allocator using the Chaitin-Briggs / Kempe heuristic
+ * with SuperFX Address Register Pool, Extended Register Pool, and Caller-Save Avoidance.
  */
 class GraphColoringAllocator(
-    val registerPool: List<Constants.Register> =
-        Constants.Register.entries
-            .filter { it != Constants.Register.R10 && it != Constants.Register.R15 },
+    val registerPool: List<Constants.Register> = defaultExtendedPool,
 ) {
+    companion object {
+        // Address Register Pool: R1..R9, R11 (all legal in ldw/stw/ldb/stb (Rm))
+        val defaultAddressRegisterPool =
+            listOf(
+                Constants.Register.R1,
+                Constants.Register.R2,
+                Constants.Register.R3,
+                Constants.Register.R4,
+                Constants.Register.R5,
+                Constants.Register.R6,
+                Constants.Register.R7,
+                Constants.Register.R8,
+                Constants.Register.R9,
+                Constants.Register.R11,
+            )
+
+        // Extended pool for scalar variables: Address Register Pool + R12, R13
+        val defaultExtendedPool =
+            defaultAddressRegisterPool +
+                listOf(
+                    Constants.Register.R12,
+                    Constants.Register.R13,
+                )
+    }
+
+    private val isCustomPool = registerPool != defaultExtendedPool
+
+    val primaryPool: List<Constants.Register> =
+        if (isCustomPool) registerPool else defaultAddressRegisterPool
+
+    val extendedPool: List<Constants.Register> =
+        if (isCustomPool) registerPool else defaultExtendedPool
+
     fun buildInterferenceGraph(
         intervals: Map<IntervalKey, Interval>,
         precolored: Map<IntervalKey, Constants.Register> = emptyMap(),
@@ -102,8 +134,11 @@ class GraphColoringAllocator(
         )
     }
 
-    fun allocate(graph: InterferenceGraph): Map<IntervalKey, AllocationResult> {
-        val k = registerPool.size
+    fun allocate(
+        graph: InterferenceGraph,
+        memoryKeys: Set<IntervalKey> = emptySet(),
+        avoidMap: Map<IntervalKey, Set<Constants.Register>> = emptyMap(),
+    ): Map<IntervalKey, AllocationResult> {
         val colors = mutableMapOf<IntervalKey, Constants.Register>()
 
         // 1. Fixed pre-colored nodes
@@ -125,23 +160,35 @@ class GraphColoringAllocator(
 
         val stack = ArrayDeque<IntervalKey>()
 
+        fun effectiveDegree(node: IntervalKey): Pair<Int, Int> {
+            val pool = if (node in memoryKeys) primaryPool else extendedPool
+            val neighbors = currentEdges[node] ?: emptySet()
+            val precoloredCount =
+                neighbors
+                    .mapNotNull { colors[it] }
+                    .filter { it in pool }
+                    .toSet()
+                    .size
+            val uncoloredCount = neighbors.count { it in uncoloredNodes }
+            return Pair(precoloredCount + uncoloredCount, pool.size)
+        }
+
         while (uncoloredNodes.isNotEmpty()) {
-            // Find an uncolored node with degree < k
-            val candidate = uncoloredNodes.firstOrNull { (currentEdges[it]?.size ?: 0) < k }
-            if (candidate != null) {
-                uncoloredNodes.remove(candidate)
-                stack.addLast(candidate)
-                for (neighbor in currentEdges[candidate] ?: emptySet()) {
-                    currentEdges[neighbor]?.remove(candidate)
+            val candidate =
+                uncoloredNodes.firstOrNull { node ->
+                    val (deg, k) = effectiveDegree(node)
+                    deg < k
                 }
-            } else {
-                // Potential spill: pick node with highest degree
-                val spillNode = uncoloredNodes.maxByOrNull { currentEdges[it]?.size ?: 0 }!!
-                uncoloredNodes.remove(spillNode)
-                stack.addLast(spillNode)
-                for (neighbor in currentEdges[spillNode] ?: emptySet()) {
-                    currentEdges[neighbor]?.remove(spillNode)
-                }
+            val chosen =
+                candidate
+                    ?: uncoloredNodes.maxByOrNull { node ->
+                        val (deg, k) = effectiveDegree(node)
+                        deg - k
+                    }!!
+            uncoloredNodes.remove(chosen)
+            stack.addLast(chosen)
+            for (neighbor in currentEdges[chosen] ?: emptySet()) {
+                currentEdges[neighbor]?.remove(chosen)
             }
         }
 
@@ -162,10 +209,16 @@ class GraphColoringAllocator(
                 }
             }
 
-            val availableColor = registerPool.firstOrNull { it !in usedColors }
-            if (availableColor != null) {
-                colors[node] = availableColor
-                result[node] = AllocationResult.Register(availableColor)
+            val pool = if (node in memoryKeys) primaryPool else extendedPool
+            val avoid = avoidMap[node] ?: emptySet()
+
+            // First prefer registers not clobbered by calls across which `node` is live
+            val preferred = pool.firstOrNull { it !in usedColors && it !in avoid }
+            val chosen = preferred ?: pool.firstOrNull { it !in usedColors }
+
+            if (chosen != null) {
+                colors[node] = chosen
+                result[node] = AllocationResult.Register(chosen)
             } else {
                 result[node] = AllocationResult.Spill
             }

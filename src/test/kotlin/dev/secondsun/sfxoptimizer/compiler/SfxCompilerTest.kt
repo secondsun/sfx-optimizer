@@ -141,4 +141,76 @@ class SfxCompilerTest {
         // #(CAMERA + camera::up) must remain intact
         assertTrue(compiled.loweredSource.contains("#(CAMERA + camera::up)"))
     }
+
+    @Test
+    fun `test unified SfxProgramAnalyzer and SfxCompiler produce identical register allocation`() {
+        val source =
+            """
+            function transform_point in_pt, out_pt : ok
+                register temp_x, temp_y, scale = r5
+                to temp_x
+                ldw (in_pt)
+                inc in_pt
+                inc in_pt
+                to temp_y
+                ldw (in_pt)
+                with temp_x
+                mult scale
+                with temp_y
+                mult scale
+                from temp_x
+                stw (out_pt)
+                inc out_pt
+                inc out_pt
+                from temp_y
+                stw (out_pt)
+                iwt ok, #1
+                return ok
+            endfunction
+
+            function process_all points, count : total
+                register cur_pt, out_buf, status
+                iwt total, #0
+                forR count
+                    call transform_point cur_pt, out_buf : status
+                    with total
+                    add status
+                endfor
+                return total
+            endfunction
+
+            register main_pts, main_count, main_res = r3
+            iwt main_pts, #100
+            iwt main_count, #10
+            call process_all main_pts, main_count : main_res
+            stop
+            """.trimIndent()
+
+        val compiler = SfxCompiler()
+        val compiled = compiler.compileSource(source)
+
+        val tokenized =
+            dev.secondsun.retro.util
+                .CA65Scanner()
+                .tokenize(source)
+        val analysis =
+            dev.secondsun.sfxoptimizer.analysis.SfxProgramAnalyzer
+                .analyze(tokenized, source.lines())
+
+        // Main allocations match
+        val main = analysis.main
+        assertNotNull(main)
+        assertEquals(main.allocatedMap, compiled.mainAllocations)
+
+        // Function allocations match
+        val analysisFnMap = analysis.functions.associateBy { it.name }
+        assertEquals(analysisFnMap.keys, compiled.functionInfos.keys)
+        for ((fnName, fnAnalysis) in analysisFnMap) {
+            val compiledFn = compiled.functionInfos[fnName]
+            assertNotNull(compiledFn)
+            assertEquals(fnAnalysis.allocatedMap, compiledFn.allocatedMap, "Allocations differ for function $fnName")
+            assertEquals(fnAnalysis.paramRegs, compiledFn.paramRegs, "Param registers differ for function $fnName")
+            assertEquals(fnAnalysis.returnReg, compiledFn.returnReg, "Return register differs for function $fnName")
+        }
+    }
 }
