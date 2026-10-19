@@ -6,6 +6,16 @@ import dev.secondsun.sfxoptimizer.graphnode.CodeNode
 import kotlin.math.max
 
 /**
+ * Violation record for stack displacement invariants.
+ */
+data class StackViolation(
+    val line: Int,
+    val rule: String,
+    val message: String,
+    val displacement: Int,
+)
+
+/**
  * Result of static stack depth analysis for a function or code block.
  */
 data class StackDepthResult(
@@ -17,6 +27,8 @@ data class StackDepthResult(
     val blockExitDepths: Map<CodeNode, Int>,
     /** Peak stack displacement (highest positive Δ_SP reached) */
     val maxDepth: Int,
+    /** List of stack violations detected */
+    val violations: List<StackViolation> = emptyList(),
 ) {
     /**
      * Computes the effective displacement below the current r10 pointer at instruction [line]
@@ -52,11 +64,28 @@ class StackDepthTracker {
     }
 
     /**
+     * Audits all functions and root blocks in [graph] with non-throwing relaxed mode,
+     * collecting all stack violations (return leaks and divergent branch depths).
+     */
+    fun auditStack(graph: CodeGraph): List<StackViolation> {
+        val violations = mutableListOf<StackViolation>()
+        violations.addAll(track(graph.startNode, strict = false).violations)
+        for ((_, func) in graph.allFunctions) {
+            violations.addAll(track(func, strict = false).violations)
+        }
+        return violations
+    }
+
+    /**
      * Analyzes stack depth starting at [rootNode] (e.g. a FunctionStart or Start block).
      *
-     * @throws IllegalStateException if a control-flow join has divergent stack depths.
+     * @param strict if true, throws [IllegalStateException] on divergent join depths; if false, records violations.
+     * @throws IllegalStateException if [strict] is true and a control-flow join has divergent stack depths.
      */
-    fun track(rootNode: CodeNode): StackDepthResult {
+    fun track(
+        rootNode: CodeNode,
+        strict: Boolean = true,
+    ): StackDepthResult {
         val entry =
             when (rootNode) {
                 is CodeNode.FunctionStart -> rootNode.functionBody.startNode.main
@@ -67,6 +96,7 @@ class StackDepthTracker {
         val blockEntryDepths = mutableMapOf<CodeNode, Int>()
         val blockExitDepths = mutableMapOf<CodeNode, Int>()
         val lineDepths = mutableMapOf<Int, Int>()
+        val violations = mutableListOf<StackViolation>()
         var peakDepth = 0
 
         val worklist = ArrayDeque<CodeNode>()
@@ -164,15 +194,85 @@ class StackDepthTracker {
 
             blockExitDepths[node] = exitDepth
 
+            if (node.exits.isEmpty() && rootNode is CodeNode.FunctionStart && exitDepth != 0) {
+                val lastLine =
+                    when (node) {
+                        is CodeNode.CodeBlock ->
+                            node.lines
+                                .lastOrNull()
+                                ?.tokens
+                                ?.firstOrNull()
+                                ?.lineNumber ?: 0
+                        is CodeNode.CallBlock -> node.line
+                        else -> 0
+                    }
+                violations.add(
+                    StackViolation(
+                        line = lastLine,
+                        rule = "STACK_LEAK_ON_RETURN",
+                        message = "Stack displacement at function return is non-zero (Δ_SP = $exitDepth bytes)",
+                        displacement = exitDepth,
+                    ),
+                )
+            }
+
             for (succ in node.exits) {
-                if (succ is CodeNode.End) continue
+                if (succ is CodeNode.End) {
+                    if (rootNode is CodeNode.FunctionStart && exitDepth != 0) {
+                        val lastLine =
+                            when (node) {
+                                is CodeNode.CodeBlock ->
+                                    node.lines
+                                        .lastOrNull()
+                                        ?.tokens
+                                        ?.firstOrNull()
+                                        ?.lineNumber ?: 0
+                                is CodeNode.CallBlock -> node.line
+                                else -> 0
+                            }
+                        violations.add(
+                            StackViolation(
+                                line = lastLine,
+                                rule = "STACK_LEAK_ON_RETURN",
+                                message = "Stack displacement at function return is non-zero (Δ_SP = $exitDepth bytes)",
+                                displacement = exitDepth,
+                            ),
+                        )
+                    }
+                    continue
+                }
 
                 val existing = blockEntryDepths[succ]
                 if (existing != null) {
                     if (existing != exitDepth) {
-                        throw IllegalStateException(
-                            "Mismatched stack depth at branch target: expected $existing bytes, but got $exitDepth bytes entering block $succ",
-                        )
+                        if (strict) {
+                            throw IllegalStateException(
+                                "Mismatched stack depth at branch target: " +
+                                    "expected $existing bytes, but got $exitDepth bytes entering block $succ",
+                            )
+                        } else {
+                            val line =
+                                when (node) {
+                                    is CodeNode.CodeBlock ->
+                                        node.lines
+                                            .lastOrNull()
+                                            ?.tokens
+                                            ?.firstOrNull()
+                                            ?.lineNumber ?: 0
+                                    is CodeNode.CallBlock -> node.line
+                                    else -> 0
+                                }
+                            violations.add(
+                                StackViolation(
+                                    line = line,
+                                    rule = "DIVERGENT_STACK_DEPTH",
+                                    message =
+                                        "Mismatched stack depth at branch target: " +
+                                            "expected $existing bytes, but got $exitDepth bytes entering block $succ",
+                                    displacement = exitDepth - existing,
+                                ),
+                            )
+                        }
                     }
                 } else {
                     blockEntryDepths[succ] = exitDepth
@@ -186,6 +286,7 @@ class StackDepthTracker {
             blockEntryDepths = blockEntryDepths,
             blockExitDepths = blockExitDepths,
             maxDepth = peakDepth,
+            violations = violations,
         )
     }
 

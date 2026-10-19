@@ -169,4 +169,48 @@ class StackDepthTrackerTest {
         val mainResult = results[graph.startNode]!!
         assertEquals(0, mainResult.maxDepth)
     }
+
+    @Test
+    fun `test auditStack detects stack leak on return`() {
+        val program =
+            """
+            function leaking_fn
+                gsu_stack_push r4
+                return
+            endfunction
+
+            call leaking_fn
+            stop
+            """.trimIndent()
+
+        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
+        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call leaking_fn") == true } ?: 0
+        val graph = graphExpanded(program, callLine)
+
+        val violations = tracker.auditStack(graph)
+        assertEquals(1, violations.size)
+        val v = violations[0]
+        assertEquals("STACK_LEAK_ON_RETURN", v.rule)
+        assertEquals(2, v.displacement)
+        assertTrue(v.message.contains("Δ_SP = 2 bytes"))
+    }
+
+    @Test
+    fun `test auditStack detects divergent branch depth without throwing`() {
+        val program =
+            """
+                beq skip
+                nop
+                gsu_stack_push r4
+            skip:
+                nop
+                stop
+            """.trimIndent()
+
+        val graph = expandAndGraph(program)
+        val violations = tracker.auditStack(graph)
+        assertEquals(1, violations.size)
+        val v = violations[0]
+        assertEquals("DIVERGENT_STACK_DEPTH", v.rule)
+    }
 }
