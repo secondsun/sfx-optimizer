@@ -139,9 +139,7 @@ class StackDepthTracker {
                         val fnName = lineToks.tokens[1].text()
                         try {
                             val fnNode = grapher.graphFunction(fnName)
-                            if (fnNode != null) {
-                                violations.addAll(track(fnNode, strict = false).violations)
-                            }
+                            violations.addAll(track(fnNode, strict = false).violations)
                         } catch (_: Throwable) {
                         }
                     }

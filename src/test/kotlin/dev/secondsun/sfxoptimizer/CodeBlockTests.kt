@@ -38,15 +38,12 @@ class CodeBlockTests {
 
         val codeGraph = graph(program)
         assertEquals(3, codeGraph.nodeCount)
-        assertTrue(
-            codeGraph.start() is
-                CodeNode.Start,
-        )
+        assertNotNull(codeGraph.start())
 
         val codeNode: CodeNode.CodeBlock = codeGraph.start().mainMethod()
 
         assertEquals(2, codeNode.lines.size)
-        assertTrue(codeGraph.end() is CodeNode.End)
+        assertNotNull(codeGraph.end())
     }
 
     @Test
