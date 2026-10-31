@@ -49,12 +49,12 @@ object SfxLivenessAnalyzer {
     fun splitLabelPrefix(tokens: List<Token>): Pair<String?, List<Token>> {
         if (tokens.isEmpty()) return Pair(null, tokens)
         val first = tokens[0]
-        if (first.text().endsWith(":") && first.type == TokenType.TOK_IDENT) {
+        if (first.text().endsWith(":") && (first.type == TokenType.TOK_IDENT || first.type == TokenType.TOK_LOCAL_IDENT)) {
             return Pair(first.text(), tokens.subList(1, tokens.size))
         }
         if (tokens.size >= 2 && tokens[1].type == TokenType.TOK_COLON) {
             val isAdjacent = (tokens[1].endIndex - tokens[1].text().length) == tokens[0].endIndex
-            if (isAdjacent && first.type == TokenType.TOK_IDENT) {
+            if (isAdjacent && (first.type == TokenType.TOK_IDENT || first.type == TokenType.TOK_LOCAL_IDENT)) {
                 return Pair(first.text() + ":", tokens.subList(2, tokens.size))
             }
         }
@@ -886,6 +886,28 @@ object SfxLivenessAnalyzer {
                 if (forStack.isNotEmpty()) {
                     val start = forStack.removeLast()
                     loops.add(start..lineIdx)
+                }
+            } else if (mnemonic == "iwt" && args.isNotEmpty() && args[0].text().equals("r15", ignoreCase = true)) {
+                val targetText =
+                    args
+                        .drop(1)
+                        .filter { it.text() != "," && it.text() != "#" }
+                        .joinToString("") { it.text().removePrefix("#") }
+                        .trim()
+                if (targetText.startsWith(":-")) {
+                    val minusCount = targetText.drop(1).count { it == '-' }
+                    val targetIdx = anonLabels.size - minusCount
+                    if (targetIdx >= 0 && targetIdx < anonLabels.size) {
+                        val targetLine = anonLabels[targetIdx]
+                        if (targetLine < lineIdx) {
+                            loops.add(targetLine..lineIdx)
+                        }
+                    }
+                } else if (targetText.isNotEmpty()) {
+                    val targetLine = namedLabels[targetText.lowercase(Locale.ROOT)]
+                    if (targetLine != null && targetLine < lineIdx) {
+                        loops.add(targetLine..lineIdx)
+                    }
                 }
             } else if ((mnemonic == "iwt" || mnemonic == "move") && args.isNotEmpty() && args[0].text().equals("r13", ignoreCase = true)) {
                 lastR13Write = lineIdx

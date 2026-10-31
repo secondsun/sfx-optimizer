@@ -586,6 +586,36 @@ class CodeBlockTests {
         assertNotNull(zInterval)
         assertTrue(zInterval!!.writes.contains(callBlock!!.line))
     }
+
+    @Test
+    fun `test iwt r15 label jump and non-label error`() {
+        val program =
+            """
+            iwt r1, #5
+            iwt r15, #next
+            nop
+            iwt r2, #10
+            next:
+            iwt r3, #15
+            stw (r3)
+            """.trimIndent()
+
+        val codeGraph = graph(program)
+        assertEquals(4, codeGraph.nodeCount)
+        val main = codeGraph.start().mainMethod()
+        assertEquals(1, main.exits.size)
+        val afterJump = main.exits[0] as CodeNode.CodeBlock
+        assertTrue(afterJump.registersUsed.contains(Constants.Register.R3))
+
+        val badJump =
+            """
+            iwt r15, #$1234
+            nop
+            """.trimIndent()
+        val badGraph = graph(badJump)
+        val badMain = badGraph.start().mainMethod()
+        assertTrue(badMain.lines[0].tokens.any { it.hasAttribute(TokenAttribute.ERROR) })
+    }
 }
 
 class MockFileService(

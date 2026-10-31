@@ -122,6 +122,99 @@ class SfxCompilerTest {
     }
 
     @Test
+    fun `test local label loop back-edge preserves variable across call`() {
+        val source =
+            """
+            function plot_item x, y : out
+                register clobber = r1
+                from x
+                to clobber
+                add y
+                move out, clobber
+                return out
+            endfunction
+
+            register row = r1, col, dummy
+            ibt row, #0
+            @row_loop:
+                ibt col, #0
+                @col_loop:
+                    call plot_item col, row : dummy
+                    inc col
+                    from col
+                    sub #4
+                    bne @col_loop
+                    nop
+                inc row
+                from row
+                sub #4
+                bne @row_loop
+                nop
+            stop
+            """.trimIndent()
+
+        val compiler = SfxCompiler()
+        val compiled = compiler.compileSource(source)
+
+        val rowReg = compiled.mainAllocations["row"]
+        val colReg = compiled.mainAllocations["col"]
+        assertNotNull(rowReg)
+        assertNotNull(colReg)
+        assertTrue(rowReg != colReg)
+        assertEquals(Constants.Register.R1, rowReg)
+
+        // Because @row_loop: is a local label back-edge target, `row` (pinned to R1) is live across
+        // `call plot_item` inside `@col_loop:` and must be caller-saved around the call.
+        assertTrue(compiled.loweredSource.contains("gsu_stack_push r1"))
+        assertTrue(compiled.loweredSource.contains("gsu_stack_pop r1"))
+    }
+
+    @Test
+    fun `test iwt r15 label loop back-edge preserves variable across call`() {
+        val source =
+            """
+            function plot_item x, y : out
+                register clobber = r1
+                from x
+                to clobber
+                add y
+                move out, clobber
+                return out
+            endfunction
+
+            register limit = r1, col, dummy
+            ibt limit, #4
+            ibt col, #0
+            xLoop:
+                call plot_item col, limit : dummy
+                inc col
+                from col
+                sub limit
+                bge doneLoop
+                nop
+                iwt r15, #xLoop
+                nop
+            doneLoop:
+            stop
+            """.trimIndent()
+
+        val compiler = SfxCompiler()
+        val compiled = compiler.compileSource(source)
+
+        val limitReg = compiled.mainAllocations["limit"]
+        val colReg = compiled.mainAllocations["col"]
+        assertNotNull(limitReg)
+        assertNotNull(colReg)
+        assertTrue(limitReg != colReg)
+        assertEquals(Constants.Register.R1, limitReg)
+
+        // Because `iwt r15, #xLoop` is a long-jump loop back-edge to `xLoop:`, `limit` (pinned to R1)
+        // is live across `call plot_item` and must be caller-saved around the call.
+        assertTrue(compiled.loweredSource.contains("gsu_stack_push r1"))
+        assertTrue(compiled.loweredSource.contains("gsu_stack_pop r1"))
+    }
+
+    @Test
     fun `test immediate and struct namespace tokens are not replaced with registers`() {
         val source =
             """

@@ -150,14 +150,40 @@ class CA65Grapher(
                     } else {
                         val nextLine = file.getLine(idx + 1)
                         code.addLine(nextLine)
-                        val dest = tokens.tokens[1]
-                        // import next token
-                        // create exits
-                        val destinationLocation = symbolService.getLocation(dest.text())
-                        val nextBlock = makeNode(file, destinationLocation.line, registerLabels = registerLabels)
-
-                        code.addExit(nextBlock)
-                        nextBlock.addEntrance(code)
+                        val isIwtJump = Instructions.IWT_JUMP.matches(tokens)
+                        val dest =
+                            if (isIwtJump) {
+                                val hashIdx = tokens.tokens.indexOfFirst { it.type == TokenType.TOK_HASH }
+                                if (hashIdx >= 0 && hashIdx + 1 < tokens.tokens.size) {
+                                    tokens.tokens[hashIdx + 1]
+                                } else {
+                                    tokens.tokens.last()
+                                }
+                            } else {
+                                tokens.tokens[1]
+                            }
+                        val isLabelToken =
+                            dest.type == TokenType.TOK_IDENT ||
+                                dest.type == TokenType.TOK_LOCAL_IDENT ||
+                                dest.type == TokenType.TOK_ULABEL ||
+                                dest.type == TokenType.TOK_A ||
+                                dest.type == TokenType.TOK_X ||
+                                dest.type == TokenType.TOK_Y ||
+                                dest.type == TokenType.TOK_S
+                        if (isIwtJump && !isLabelToken) {
+                            dest.addAttribute(TokenAttribute.ERROR)
+                            dest.message = "IWT R15 jump target must be a label, found: ${dest.text()}"
+                        } else {
+                            val destinationLocation = symbolService.getLocation(dest.text())
+                            if (destinationLocation != null) {
+                                val nextBlock = makeNode(file, destinationLocation.line, registerLabels = registerLabels)
+                                code.addExit(nextBlock)
+                                nextBlock.addEntrance(code)
+                            } else {
+                                dest.addAttribute(TokenAttribute.ERROR)
+                                dest.message = "Unknown jump target label: ${dest.text()}"
+                            }
+                        }
                     }
                     break
                 } else if (isConditionalJump(tokens)) {
@@ -546,7 +572,13 @@ class CA65Grapher(
     ) {
         if (tokens[0].type == TokenType.TOK_REGISTER_KEYWORD) {
             tokens.tokens.forEach {
-                if (it.type == TokenType.TOK_IDENT) {
+                if (it.type == TokenType.TOK_IDENT ||
+                    it.type == TokenType.TOK_LOCAL_IDENT ||
+                    it.type == TokenType.TOK_A ||
+                    it.type == TokenType.TOK_X ||
+                    it.type == TokenType.TOK_Y ||
+                    it.type == TokenType.TOK_S
+                ) {
                     registerLabels.add(RegisterLabel(it.text()))
                     it.addAttribute(TokenAttribute.REGISTER_LABEL)
                 } else if (it.type == TokenType.TOK_COMMA) {
