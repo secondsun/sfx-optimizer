@@ -71,13 +71,10 @@ class ParallelMoveResolverTest {
         val expectedAsm =
             listOf(
                 "with r1",
-                "to r1",
                 "xor r2",
                 "with r2",
-                "to r2",
                 "xor r1",
                 "with r1",
-                "to r1",
                 "xor r2",
             )
         assertEquals(expectedAsm, asm)

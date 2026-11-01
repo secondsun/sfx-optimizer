@@ -19,9 +19,9 @@ sealed interface MoveInstruction {
 
     /**
      * In-place 3-instruction XOR swap between two registers without temporary registers or memory:
-     * with rA / to rA / xor rB
-     * with rB / to rB / xor rA
-     * with rA / to rA / xor rB
+     * with rA / xor rB
+     * with rB / xor rA
+     * with rA / xor rB
      */
     data class XorSwap(
         val regA: Register,
@@ -30,13 +30,10 @@ sealed interface MoveInstruction {
         override fun toAssembly(): List<String> =
             listOf(
                 "with ${regA.label}",
-                "to ${regA.label}",
                 "xor ${regB.label}",
                 "with ${regB.label}",
-                "to ${regB.label}",
                 "xor ${regA.label}",
                 "with ${regA.label}",
-                "to ${regA.label}",
                 "xor ${regB.label}",
             )
     }
