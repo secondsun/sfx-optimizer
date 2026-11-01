@@ -616,6 +616,38 @@ class CodeBlockTests {
         val badMain = badGraph.start().mainMethod()
         assertTrue(badMain.lines[0].tokens.any { it.hasAttribute(TokenAttribute.ERROR) })
     }
+
+    @Test
+    fun `test anonymous label branch and loop graph`() {
+        val program =
+            """
+            iwt r1, #5
+            :
+            dec r1
+            bne :-
+            nop
+            beq :+
+            nop
+            :
+            stop
+            """.trimIndent()
+
+        val codeGraph = graph(program)
+        val main = codeGraph.start().mainMethod()
+        assertNotNull(main)
+        codeGraph.traverse { node ->
+            if (node is CodeNode.CodeBlock) {
+                for (line in node.lines) {
+                    for (token in line.tokens) {
+                        assertFalse(
+                            token.hasAttribute(TokenAttribute.ERROR),
+                            "Unexpected error on ${token.text()}: ${token.message}",
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 class MockFileService(

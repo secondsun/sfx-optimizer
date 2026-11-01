@@ -6,6 +6,7 @@ import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenAttribute
 import dev.secondsun.retro.util.TokenType
+import dev.secondsun.retro.util.diagnostic.AnonymousLabelValidator
 import dev.secondsun.retro.util.instruction.GSUInstruction
 import dev.secondsun.retro.util.instruction.Instructions
 import dev.secondsun.retro.util.vo.Location
@@ -174,7 +175,17 @@ class CA65Grapher(
                             dest.addAttribute(TokenAttribute.ERROR)
                             dest.message = "IWT R15 jump target must be a label, found: ${dest.text()}"
                         } else {
-                            val destinationLocation = symbolService.getLocation(dest.text())
+                            val destinationLocation =
+                                if (dest.type == TokenType.TOK_ULABEL) {
+                                    val targetLine = AnonymousLabelValidator.resolveTargetLine(file, idx, dest)
+                                    if (targetLine.isPresent) {
+                                        Location(file.uri, targetLine.asInt, 0, 0)
+                                    } else {
+                                        null
+                                    }
+                                } else {
+                                    symbolService.getLocation(dest.text())
+                                }
                             if (destinationLocation != null) {
                                 val nextBlock = makeNode(file, destinationLocation.line, registerLabels = registerLabels)
                                 code.addExit(nextBlock)
@@ -195,17 +206,31 @@ class CA65Grapher(
                     var dest = tokens.tokens[1]
                     // import next token
                     // create exits
-                    var destinationLocation = symbolService.getLocation(dest.text())
-                    var nextBlock = makeNode(file, destinationLocation.line, registerLabels = registerLabels)
-
-                    code.addExit(nextBlock)
-                    nextBlock.addEntrance(code)
+                    var destinationLocation =
+                        if (dest.type == TokenType.TOK_ULABEL) {
+                            val targetLine = AnonymousLabelValidator.resolveTargetLine(file, idx, dest)
+                            if (targetLine.isPresent) {
+                                Location(file.uri, targetLine.asInt, 0, 0)
+                            } else {
+                                null
+                            }
+                        } else {
+                            symbolService.getLocation(dest.text())
+                        }
+                    if (destinationLocation != null) {
+                        val branchBlock = makeNode(file, destinationLocation.line, registerLabels = registerLabels)
+                        code.addExit(branchBlock)
+                        branchBlock.addEntrance(code)
+                    } else {
+                        dest.addAttribute(TokenAttribute.ERROR)
+                        dest.message = "Unknown jump target label: ${dest.text()}"
+                    }
 
                     // don't take the branch
-                    nextBlock = makeNode(file, idx + 2, registerLabels = registerLabels)
+                    val fallthroughBlock = makeNode(file, idx + 2, registerLabels = registerLabels)
 
-                    code.addExit(nextBlock)
-                    nextBlock.addEntrance(code)
+                    code.addExit(fallthroughBlock)
+                    fallthroughBlock.addEntrance(code)
                     break
                 } else if (isForLoop(tokens)) {
                     code.addLine(tokens)
@@ -646,7 +671,14 @@ class CA65Grapher(
 
     private fun isLabelDef(tokens: Tokens): Boolean {
         val tokensList = tokens.tokens
-        return tokensList.size == 2 && tokensList[0].type == TokenType.TOK_IDENT && tokensList[1].type == TokenType.TOK_COLON
+        if (tokensList.isEmpty()) return false
+        if (tokensList.size == 2 && tokensList[0].type == TokenType.TOK_IDENT && tokensList[1].type == TokenType.TOK_COLON) {
+            return true
+        }
+        if (tokensList[0].type == TokenType.TOK_COLON) {
+            return true
+        }
+        return false
     }
 }
 
