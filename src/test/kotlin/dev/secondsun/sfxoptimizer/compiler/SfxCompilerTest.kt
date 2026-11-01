@@ -153,7 +153,7 @@ class SfxCompilerTest {
             stop
             """.trimIndent()
 
-        val compiler = SfxCompiler()
+        val compiler = SfxCompiler(enableInlining = false)
         val compiled = compiler.compileSource(source)
 
         val rowReg = compiled.mainAllocations["row"]
@@ -198,7 +198,7 @@ class SfxCompilerTest {
             stop
             """.trimIndent()
 
-        val compiler = SfxCompiler()
+        val compiler = SfxCompiler(enableInlining = false)
         val compiled = compiler.compileSource(source)
 
         val limitReg = compiled.mainAllocations["limit"]
@@ -279,7 +279,7 @@ class SfxCompilerTest {
             stop
             """.trimIndent()
 
-        val compiler = SfxCompiler()
+        val compiler = SfxCompiler(enableInlining = false)
         val compiled = compiler.compileSource(source)
 
         val tokenized =

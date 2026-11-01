@@ -446,6 +446,7 @@ object SfxLivenessAnalyzer {
 
         when (mnemonic) {
             "function" -> {
+                implicitReads.add(r11Key) // function pushes r11 (return address)
                 for (param in params) {
                     resolveKeyByName(param, declaredRegisters)?.let { implicitWrites.add(it) }
                 }

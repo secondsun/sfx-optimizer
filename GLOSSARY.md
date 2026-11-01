@@ -28,3 +28,14 @@ _Avoid_: Secondary pool, full register pool
 The interprocedural preference during graph coloring that steers variables live across a `call` site away from registers clobbered by the callee, avoiding stack push/pop spill overhead around the call.
 _Avoid_: Call clobber penalty, callee interference
 
+**Loop-Invariant Caller-Save Hoisting**:
+The lowering step that moves a call site's caller-save `gsu_stack_push`/`gsu_stack_pop` pair from inside a hardware `for`/`forR` loop to just before the loop and just after `endfor`. Applies only to registers that are neither read nor written in the loop (see ADR 0001).
+_Avoid_: Spill hoisting, loop-invariant code motion
+
+**Inlining**:
+The pre-allocation pass that replaces a `call` with the callee body, alpha-renaming its variables so caller and callee share one Interference Graph. Triggered by `inline function` or by a small non-recursive leaf function called inside a loop.
+_Avoid_: Macro expansion, call elimination
+
+**Peephole Pass**:
+The post-allocation rewrite over lowered assembly (`iwt`→`ibt` narrowing, self-move and redundant `from r0` removal, power-of-two `mult` reduction).
+_Avoid_: Cleanup pass, post-optimizer

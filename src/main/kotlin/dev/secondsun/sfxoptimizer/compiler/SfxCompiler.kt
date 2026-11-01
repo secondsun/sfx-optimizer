@@ -25,7 +25,12 @@ import java.util.Locale
  * 3. Lowers `register`, `function`, `return`, `call` (with parallel moves and caller-save push/pop),
  *    and variable token replacement into standard ca65 SuperFX assembly.
  */
-class SfxCompiler {
+class SfxCompiler(
+    private val enableInlining: Boolean = true,
+    private val inlineThreshold: Int = 60,
+    private val enableHoisting: Boolean = true,
+    private val enablePeephole: Boolean = true,
+) {
     data class AllocatedFunctionInfo(
         val name: String,
         val paramRegs: List<Constants.Register>,
@@ -118,7 +123,8 @@ class SfxCompiler {
         return null
     }
 
-    private fun compileExpanded(expandedSource: String): CompilationResult {
+    private fun compileExpanded(rawExpandedSource: String): CompilationResult {
+        val expandedSource = if (enableInlining) SfxInliner(inlineThreshold).inline(rawExpandedSource) else rawExpandedSource
         val scanner = CA65Scanner()
         val tokenizedFile = scanner.tokenize(expandedSource)
         val rawLines = expandedSource.lines()
@@ -187,7 +193,7 @@ class SfxCompiler {
         }
 
         return CompilationResult(
-            loweredSource = loweredLines.joinToString("\n"),
+            loweredSource = loweredLines.joinToString("\n").let { if (enablePeephole) SfxPeepholeOptimizer.optimize(it) else it },
             functionInfos = allocatedFunctions,
             mainAllocations = mainAllocations,
         )
@@ -244,6 +250,8 @@ class SfxCompiler {
         enclosingFunctionInfo: AllocatedFunctionInfo?,
     ) {
         val moveResolver = ParallelMoveResolver()
+        // Hoisted caller-saves: loop line -> registers to push before / pop after
+        val hoistedByLoop = linkedMapOf<IntRange, MutableSet<Constants.Register>>()
 
         for (lineIdx in scopeLines.sorted()) {
             val rawLine = rawLines[lineIdx]
@@ -340,6 +348,18 @@ class SfxCompiler {
                         callerSaveRegs.sortBy { it.ordinal }
                     }
 
+                    if (enableHoisting) {
+                        val it = callerSaveRegs.iterator()
+                        while (it.hasNext()) {
+                            val reg = it.next()
+                            val loop = findHoistLoop(reg, lineIdx, loops, intervals, varToReg, rawLines)
+                            if (loop != null) {
+                                hoistedByLoop.getOrPut(loop) { sortedSetOf(compareBy { r -> r.ordinal }) }.add(reg)
+                                it.remove()
+                            }
+                        }
+                    }
+
                     for (reg in callerSaveRegs) {
                         out.add("${indent}gsu_stack_push ${reg.name.lowercase(Locale.ROOT)}")
                     }
@@ -422,5 +442,81 @@ class SfxCompiler {
                 loweredLines[lineIdx] = modified
             }
         }
+
+        for ((loop, regs) in hoistedByLoop) {
+            val indent = rawLines[loop.first].takeWhile { it == ' ' || it == '\t' }
+            val pushes = regs.joinToString("\n") { "${indent}gsu_stack_push ${it.name.lowercase(Locale.ROOT)}" }
+            val pops = regs.reversed().joinToString("\n") { "${indent}gsu_stack_pop ${it.name.lowercase(Locale.ROOT)}" }
+            loweredLines[loop.first] = pushes + "\n" + loweredLines[loop.first]
+            loweredLines[loop.last] = loweredLines[loop.last] + "\n" + pops
+        }
+    }
+
+    private val branchMnemonics =
+        setOf("bra", "beq", "bne", "bcc", "bcs", "bpl", "bmi", "bvc", "bvs", "blt", "bge", "jmp", "ljmp")
+
+    /**
+     * Returns the outermost hardware `for`/`forR` loop around [callLine] across which [reg] can have its
+     * caller-save push/pop hoisted: the register is neither read nor written inside the loop (it is only
+     * live across it, so the callee clobbering it per iteration is harmless) and the loop has no early exit.
+     */
+    private fun findHoistLoop(
+        reg: Constants.Register,
+        callLine: Int,
+        loops: List<IntRange>,
+        intervals: Map<IntervalKey, Interval>,
+        varToReg: Map<String, Constants.Register>,
+        rawLines: List<String>,
+    ): IntRange? {
+        fun mnemonicOf(line: Int): String =
+            rawLines[line]
+                .substringBefore(';')
+                .replace(Regex("""^\s*[@\w.]+:"""), "")
+                .trim()
+                .substringBefore(' ')
+                .lowercase(Locale.ROOT)
+
+        for (loop in loops.filter { callLine in it }.sortedByDescending { it.last - it.first }) {
+            val startMn = mnemonicOf(loop.first)
+            if ((startMn != "for" && startMn != "forr") || mnemonicOf(loop.last) != "endfor") continue
+
+            val touched =
+                intervals.any { (key, intv) ->
+                    val r =
+                        when (key) {
+                            is IntervalKey.RegisterKey -> key.register
+                            is IntervalKey.LabelKey -> varToReg[key.label.lowercase(Locale.ROOT)]
+                        }
+                    r == reg && (intv.reads.any { it in loop } || intv.writes.any { it in loop })
+                }
+            if (touched) continue
+
+            val labelsInLoop =
+                loop
+                    .mapNotNull {
+                        Regex(
+                            """^\s*(@?\w+):""",
+                        ).find(rawLines[it].substringBefore(';'))?.groupValues?.get(1)?.lowercase(Locale.ROOT)
+                    }.toSet()
+            val earlyExit =
+                loop.any { l ->
+                    val mn = mnemonicOf(l)
+                    if (mn == "return") return@any true
+                    if (mn in branchMnemonics) {
+                        val target =
+                            rawLines[l]
+                                .substringBefore(';')
+                                .trim()
+                                .substringAfter(' ', "")
+                                .trim()
+                                .lowercase(Locale.ROOT)
+                        target !in labelsInLoop
+                    } else {
+                        false
+                    }
+                }
+            if (!earlyExit) return loop
+        }
+        return null
     }
 }

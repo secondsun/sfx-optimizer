@@ -128,10 +128,17 @@ Always use the included Maven wrapper (`./mvnw`):
   ./mvnw test -Dtest=ViewerServerTest#launchViewerManually
   ```
   *Or run `ViewerServerKt.main()` directly.*
+- **Compile an `.sgs` file with the CLI** (what `libSFX.make` runs; repackage first, since `target/sfx-optimizer.jar` is not rebuilt by `./mvnw test`):
+  ```bash
+  ./mvnw -q package -DskipTests
+  java -jar target/sfx-optimizer.jar -c <in>.sgs -o <out>.opt.sgs -I <dir-of-in> -I <libSFX/include> -I <X-GSU>
+  ```
+  Assemble the result with `snes-sfx-demo/libSFX/tools/cc65/bin/ca65 -D TARGET_GSU` to confirm it is valid.
 - **Full Verification (Tests, Javadoc, Spotless, same as CI)**:
   ```bash
   ./mvnw clean verify -Dgpg.skip=true
   ```
+  Run `spotless:check` (or `verify`) before finishing; `test` alone skips formatting. The pre-commit hook enforces both.
 
 ---
 
