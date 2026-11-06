@@ -232,4 +232,120 @@ class StackDepthTrackerTest {
         assertEquals("STACK_LEAK_ON_RETURN", diag.code())
         assertTrue(diag.message().contains("Δ_SP = 2 bytes"))
     }
+
+    @Test
+    fun `test intra-function long jump via iwt and jmp tracks stack depth and does not leak`() {
+        val program =
+            """
+            function long_jump_fn
+                gsu_stack_push r1
+                iwt r13, #@cleanup
+                jmp r13
+                nop
+            @cleanup:
+                gsu_stack_pop r1
+                return
+            endfunction
+
+            call long_jump_fn
+            stop
+            """.trimIndent()
+
+        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
+        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call long_jump_fn") == true } ?: 0
+        val graph = graphExpanded(program, callLine)
+        val results = tracker.trackGraph(graph)
+
+        val fn = graph.getFunction("long_jump_fn")!!
+        val fnResult = results[fn]!!
+        assertEquals(2, fnResult.maxDepth)
+        assertEquals(0, fnResult.violations.size)
+
+        val violations = tracker.auditStack(graph)
+        assertEquals(0, violations.size)
+
+        val rawTokenized = CA65Scanner().tokenize(program)
+        val diagnostics = tracker.auditFile(rawTokenized)
+        assertTrue(diagnostics.none { it.code() == "STACK_LEAK_ON_RETURN" })
+    }
+
+    @Test
+    fun `test intra-function long jump via iwt and jmp detects genuine stack leak at return`() {
+        val program =
+            """
+            function leaking_long_jump_fn
+                gsu_stack_push r1
+                iwt r13, #@cleanup
+                jmp r13
+                nop
+            @cleanup:
+                return
+            endfunction
+
+            call leaking_long_jump_fn
+            stop
+            """.trimIndent()
+
+        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
+        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call leaking_long_jump_fn") == true } ?: 0
+        val graph = graphExpanded(program, callLine)
+        val results = tracker.trackGraph(graph)
+
+        val fn = graph.getFunction("leaking_long_jump_fn")!!
+        val fnResult = results[fn]!!
+        assertEquals(2, fnResult.maxDepth)
+        assertEquals(1, fnResult.violations.size)
+        assertEquals("STACK_LEAK_ON_RETURN", fnResult.violations[0].rule)
+        assertEquals(2, fnResult.violations[0].displacement)
+
+        val violations = tracker.auditStack(graph)
+        assertEquals(1, violations.size)
+        assertEquals("STACK_LEAK_ON_RETURN", violations[0].rule)
+        assertEquals(2, violations[0].displacement)
+        assertTrue(violations[0].message.contains("Δ_SP = 2 bytes"))
+    }
+
+    @Test
+    fun `test unresolved dynamic indirect jump does not emit stack leak on return`() {
+        val program =
+            """
+            function dynamic_dispatch_fn
+                gsu_stack_push r1
+                jmp r12
+                nop
+            endfunction
+
+            call dynamic_dispatch_fn
+            stop
+            """.trimIndent()
+
+        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
+        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call dynamic_dispatch_fn") == true } ?: 0
+        val graph = graphExpanded(program, callLine)
+        val violations = tracker.auditStack(graph)
+        assertTrue(violations.none { it.rule == "STACK_LEAK_ON_RETURN" })
+    }
+
+    @Test
+    fun `test return via r11 with stack leak still triggers STACK_LEAK_ON_RETURN`() {
+        val program =
+            """
+            function r11_return_fn
+                gsu_stack_push r1
+                jmp r11
+                nop
+            endfunction
+
+            call r11_return_fn
+            stop
+            """.trimIndent()
+
+        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
+        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call r11_return_fn") == true } ?: 0
+        val graph = graphExpanded(program, callLine)
+        val violations = tracker.auditStack(graph)
+        assertEquals(1, violations.size)
+        assertEquals("STACK_LEAK_ON_RETURN", violations[0].rule)
+        assertEquals(2, violations[0].displacement)
+    }
 }

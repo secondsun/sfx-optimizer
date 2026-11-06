@@ -3,9 +3,11 @@ package dev.secondsun.sfxoptimizer.stack
 import dev.secondsun.retro.util.FileService
 import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.Token
+import dev.secondsun.retro.util.TokenType
 import dev.secondsun.retro.util.WorkspaceIndex
 import dev.secondsun.retro.util.diagnostic.SyntaxDiagnostic
 import dev.secondsun.retro.util.vo.TokenizedFile
+import dev.secondsun.sfxoptimizer.Constants
 import dev.secondsun.sfxoptimizer.graphbuilder.CA65Grapher
 import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
 import dev.secondsun.sfxoptimizer.graphnode.CodeNode
@@ -278,25 +280,49 @@ class StackDepthTracker {
             blockExitDepths[node] = exitDepth
 
             if (node.exits.isEmpty() && rootNode is CodeNode.FunctionStart && exitDepth != 0) {
-                val lastLine =
-                    when (node) {
-                        is CodeNode.CodeBlock ->
-                            node.lines
-                                .lastOrNull()
-                                ?.tokens
-                                ?.firstOrNull()
-                                ?.lineNumber ?: 0
-                        is CodeNode.CallBlock -> node.line
-                        else -> 0
+                val isUnresolvedIndirectJump =
+                    if (node is CodeNode.CodeBlock) {
+                        val meaningfulLines = node.lines.filter { it.tokens.isNotEmpty() }
+                        val jumpLine =
+                            meaningfulLines.takeLast(2).firstOrNull { line ->
+                                val firstTok = line.tokens[0].text().lowercase()
+                                (firstTok == "jmp" || firstTok == "ljmp") &&
+                                    line.tokens.size >= 2 &&
+                                    let {
+                                        val targetToken = line.tokens[1]
+                                        val targetText = targetToken.text()
+                                        val isReg =
+                                            targetToken.type == TokenType.TOK_REGISTER ||
+                                                Constants.isRegister(targetText)
+                                        isReg && !targetText.equals("r11", ignoreCase = true)
+                                    }
+                            }
+                        jumpLine != null
+                    } else {
+                        false
                     }
-                violations.add(
-                    StackViolation(
-                        line = lastLine,
-                        rule = "STACK_LEAK_ON_RETURN",
-                        message = "Stack displacement at function return is non-zero (Δ_SP = $exitDepth bytes)",
-                        displacement = exitDepth,
-                    ),
-                )
+
+                if (!isUnresolvedIndirectJump) {
+                    val lastLine =
+                        when (node) {
+                            is CodeNode.CodeBlock ->
+                                node.lines
+                                    .lastOrNull()
+                                    ?.tokens
+                                    ?.firstOrNull()
+                                    ?.lineNumber ?: 0
+                            is CodeNode.CallBlock -> node.line
+                            else -> 0
+                        }
+                    violations.add(
+                        StackViolation(
+                            line = lastLine,
+                            rule = "STACK_LEAK_ON_RETURN",
+                            message = "Stack displacement at function return is non-zero (Δ_SP = $exitDepth bytes)",
+                            displacement = exitDepth,
+                        ),
+                    )
+                }
             }
 
             for (succ in node.exits) {

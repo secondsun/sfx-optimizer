@@ -152,7 +152,11 @@ class CA65Grapher(
                         val nextLine = file.getLine(idx + 1)
                         code.addLine(nextLine)
                         val isIwtJump = Instructions.IWT_JUMP.matches(tokens)
-                        val dest =
+                        val isRegJump =
+                            !isIwtJump &&
+                                tokens.tokens.size >= 2 &&
+                                (tokens.tokens[1].type == TokenType.TOK_REGISTER || Constants.isRegister(tokens.tokens[1].text()))
+                        val dest: Token? =
                             if (isIwtJump) {
                                 val hashIdx = tokens.tokens.indexOfFirst { it.type == TokenType.TOK_HASH }
                                 if (hashIdx >= 0 && hashIdx + 1 < tokens.tokens.size) {
@@ -160,39 +164,31 @@ class CA65Grapher(
                                 } else {
                                     tokens.tokens.last()
                                 }
+                            } else if (isRegJump) {
+                                val regName = tokens.tokens[1].text()
+                                findPrecedingIwtTarget(code.lines, regName, tokens, code)
                             } else {
                                 tokens.tokens[1]
                             }
-                        val isLabelToken =
-                            dest.type == TokenType.TOK_IDENT ||
-                                dest.type == TokenType.TOK_LOCAL_IDENT ||
-                                dest.type == TokenType.TOK_ULABEL ||
-                                dest.type == TokenType.TOK_A ||
-                                dest.type == TokenType.TOK_X ||
-                                dest.type == TokenType.TOK_Y ||
-                                dest.type == TokenType.TOK_S
-                        if (isIwtJump && !isLabelToken) {
-                            dest.addAttribute(TokenAttribute.ERROR)
-                            dest.message = "IWT R15 jump target must be a label, found: ${dest.text()}"
-                        } else {
-                            val destinationLocation =
-                                if (dest.type == TokenType.TOK_ULABEL) {
-                                    val targetLine = AnonymousLabelValidator.resolveTargetLine(file, idx, dest)
-                                    if (targetLine.isPresent) {
-                                        Location(file.uri, targetLine.asInt, 0, 0)
-                                    } else {
-                                        null
-                                    }
-                                } else {
-                                    symbolService.getLocation(dest.text())
+
+                        if (isIwtJump) {
+                            if (dest == null || !isLabelToken(dest)) {
+                                dest?.let {
+                                    it.addAttribute(TokenAttribute.ERROR)
+                                    it.message = "IWT R15 jump target must be a label, found: ${it.text()}"
                                 }
-                            if (destinationLocation != null) {
-                                val nextBlock = makeNode(file, destinationLocation.line, registerLabels = registerLabels)
-                                code.addExit(nextBlock)
-                                nextBlock.addEntrance(code)
                             } else {
-                                dest.addAttribute(TokenAttribute.ERROR)
-                                dest.message = "Unknown jump target label: ${dest.text()}"
+                                resolveAndConnectJump(file, idx, dest, registerLabels, code)
+                            }
+                        } else if (isRegJump) {
+                            if (dest != null) {
+                                resolveAndConnectJump(file, idx, dest, registerLabels, code)
+                            }
+                            // If dest == null, this is an unresolved dynamic jump (e.g. jump table or jmp r11).
+                            // Do NOT mark with TokenAttribute.ERROR.
+                        } else {
+                            if (dest != null) {
+                                resolveAndConnectJump(file, idx, dest, registerLabels, code)
                             }
                         }
                     }
@@ -509,6 +505,79 @@ class CA65Grapher(
             }
         }
         return false
+    }
+
+    private fun isLabelToken(tok: Token): Boolean =
+        tok.type == TokenType.TOK_IDENT ||
+            tok.type == TokenType.TOK_LOCAL_IDENT ||
+            tok.type == TokenType.TOK_ULABEL ||
+            tok.type == TokenType.TOK_A ||
+            tok.type == TokenType.TOK_X ||
+            tok.type == TokenType.TOK_Y ||
+            tok.type == TokenType.TOK_S
+
+    private fun findPrecedingIwtTarget(
+        lines: List<Tokens>,
+        regName: String,
+        jumpTokens: Tokens,
+        code: CodeNode.CodeBlock,
+    ): Token? {
+        val jumpIdx = lines.lastIndexOf(jumpTokens).let { if (it >= 0) it else lines.size }
+        val jumpLine = jumpTokens.tokens.firstOrNull()?.lineNumber ?: Int.MAX_VALUE
+        val regKey = Constants.register(regName)?.let { IntervalKey.RegisterKey(it) }
+        val writes = regKey?.let { code.intervals[it]?.writes } ?: emptySet()
+
+        for (i in (jumpIdx - 1) downTo 0) {
+            val line = lines[i]
+            if (line.tokens.isEmpty()) continue
+            val first = line.tokens[0]
+            if (first.text().equals("iwt", ignoreCase = true)) {
+                if (line.tokens.size >= 2 && line.tokens[1].text().equals(regName, ignoreCase = true)) {
+                    val iwtLine = line.tokens.first().lineNumber
+                    if (writes.any { it > iwtLine && it < jumpLine }) {
+                        return null
+                    }
+                    val hashIdx = line.tokens.indexOfFirst { it.type == TokenType.TOK_HASH }
+                    if (hashIdx >= 0 && hashIdx + 1 < line.tokens.size) {
+                        val targetCandidate =
+                            line.tokens.subList(hashIdx + 1, line.tokens.size).firstOrNull { isLabelToken(it) }
+                        if (targetCandidate != null) {
+                            return targetCandidate
+                        }
+                    }
+                    return null
+                }
+            }
+        }
+        return null
+    }
+
+    private fun resolveAndConnectJump(
+        file: TokenizedFile,
+        idx: Int,
+        dest: Token,
+        registerLabels: MutableSet<RegisterLabel>,
+        code: CodeNode.CodeBlock,
+    ) {
+        val destinationLocation =
+            if (dest.type == TokenType.TOK_ULABEL) {
+                val targetLine = AnonymousLabelValidator.resolveTargetLine(file, idx, dest)
+                if (targetLine.isPresent) {
+                    Location(file.uri, targetLine.asInt, 0, 0)
+                } else {
+                    null
+                }
+            } else {
+                symbolService.getLocation(dest.text()) ?: symbolService.getLocation(dest, file)
+            }
+        if (destinationLocation != null) {
+            val nextBlock = makeNode(file, destinationLocation.line, registerLabels = registerLabels)
+            code.addExit(nextBlock)
+            nextBlock.addEntrance(code)
+        } else {
+            dest.addAttribute(TokenAttribute.ERROR)
+            dest.message = "Unknown jump target label: ${dest.text()}"
+        }
     }
 
     private fun getStepInType(
