@@ -35,14 +35,14 @@ The optimizer processes assembly source files containing high-level register pse
 ```
 
 ### Key Modules & Files
-- [`CA65Grapher.kt`](file:///home/summers/Projects/sfx-optimizer/src/main/kotlin/dev/secondsun/sfxoptimizer/graphbuilder/CA65Grapher.kt): Parses tokens and constructs CFG blocks (`CodeBlock`, `CallBlock`, `FunctionStart`, `End`).
-- [`CodeGraph.kt`](file:///home/summers/Projects/sfx-optimizer/src/main/kotlin/dev/secondsun/sfxoptimizer/graphnode/CodeGraph.kt): Directed graph representing program flow, entry point, functions, and exits.
-- [`Interval.kt`](file:///home/summers/Projects/sfx-optimizer/src/main/kotlin/dev/secondsun/sfxoptimizer/Interval.kt): Encapsulates live range start/end and read/write access points for register keys and labels.
-- [`Allocator.kt`](file:///home/summers/Projects/sfx-optimizer/src/main/kotlin/dev/secondsun/sfxoptimizer/Allocator.kt): Houses register allocation, interference graph generation, Chaitin-Briggs / Kempe graph coloring, pre-colored constraints, and spill handling.
-- [`Parser.kt`](file:///home/summers/Projects/sfx-optimizer/src/main/kotlin/dev/secondsun/sfxoptimizer/Parser.kt): Hardware register definitions (`Constants.Register`), register lookup, and parsing utilities.
-- [`CodeAnalyzer.kt`](file:///home/summers/Projects/sfx-optimizer/src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/CodeAnalyzer.kt): Analyzes assembly source for the viewer, calculating function boundaries, instruction effects (explicit and implicit), live ranges, interference sets, and register allocations.
-- [`ViewerServer.kt`](file:///home/summers/Projects/sfx-optimizer/src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/ViewerServer.kt): Lightweight embedded HTTP server providing REST API endpoints (`/api/analyze`, `/api/files`, `/api/file`) and static web assets.
-- [`src/main/resources/viewer/`](file:///home/summers/Projects/sfx-optimizer/src/main/resources/viewer/): Frontend assets (`index.html`, `viewer.css`, `viewer.js`) featuring interactive SVG connection curves, swimlanes, and pinned detail popovers.
+- [`CA65Grapher.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/graphbuilder/CA65Grapher.kt): Parses tokens and constructs CFG blocks (`CodeBlock`, `CallBlock`, `FunctionStart`, `End`).
+- [`CodeGraph.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/graphnode/CodeGraph.kt): Directed graph representing program flow, entry point, functions, and exits.
+- [`Interval.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Interval.kt): Encapsulates live range start/end and read/write access points for register keys and labels.
+- [`Allocator.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Allocator.kt): Houses register allocation, interference graph generation, Chaitin-Briggs / Kempe graph coloring, pre-colored constraints, and spill handling.
+- [`Parser.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Parser.kt): Hardware register definitions (`Constants.Register`), register lookup, and parsing utilities.
+- [`CodeAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/CodeAnalyzer.kt): Analyzes assembly source for the viewer, calculating function boundaries, instruction effects (explicit and implicit), live ranges, interference sets, and register allocations.
+- [`ViewerServer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/ViewerServer.kt): Lightweight embedded HTTP server providing REST API endpoints (`/api/analyze`, `/api/files`, `/api/file`) and static web assets.
+- [`src/main/resources/viewer/`](src/main/resources/viewer/): Frontend assets (`index.html`, `viewer.css`, `viewer.js`) featuring interactive SVG connection curves, swimlanes, and pinned detail popovers.
 
 ---
 
