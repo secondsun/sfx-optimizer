@@ -1,110 +1,23 @@
 package dev.secondsun.sfxoptimizer.viewer
 
 import dev.secondsun.retro.util.CA65Scanner
-import dev.secondsun.retro.util.FileService
-import dev.secondsun.retro.util.SymbolService
 import dev.secondsun.retro.util.Token
+import dev.secondsun.retro.util.sfx.SuperFxIsa
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.sfxoptimizer.Constants
-import dev.secondsun.sfxoptimizer.GraphColoringAllocator
 import dev.secondsun.sfxoptimizer.Interval
 import dev.secondsun.sfxoptimizer.IntervalKey
+import dev.secondsun.sfxoptimizer.analysis.CfgBlock
 import dev.secondsun.sfxoptimizer.analysis.LineEffect
+import dev.secondsun.sfxoptimizer.analysis.SfxLivenessAnalyzer
 import dev.secondsun.sfxoptimizer.analysis.SfxProgramAnalyzer
-import dev.secondsun.sfxoptimizer.graphbuilder.CA65Grapher
-import dev.secondsun.sfxoptimizer.graphnode.CodeGraph
-import dev.secondsun.sfxoptimizer.graphnode.CodeNode
 import java.net.URI
 import java.util.Locale
 
 class CodeAnalyzer {
-    private val superFxMnemonics =
-        setOf(
-            "add",
-            "adc",
-            "alt1",
-            "alt2",
-            "alt3",
-            "and",
-            "asr",
-            "bcc",
-            "bcs",
-            "beq",
-            "bge",
-            "bic",
-            "blt",
-            "bmi",
-            "bne",
-            "bpl",
-            "bra",
-            "bvc",
-            "bvs",
-            "cache",
-            "cmode",
-            "cmp",
-            "color",
-            "dec",
-            "div2",
-            "fmult",
-            "from",
-            "getb",
-            "getbh",
-            "getbl",
-            "getbs",
-            "getc",
-            "hib",
-            "ibt",
-            "inc",
-            "iwt",
-            "jal",
-            "jmp",
-            "ldb",
-            "ldw",
-            "lea",
-            "link",
-            "ljmp",
-            "lm",
-            "lms",
-            "lmult",
-            "lob",
-            "loop",
-            "lsr",
-            "merge",
-            "move",
-            "moveb",
-            "moves",
-            "movew",
-            "mult",
-            "nop",
-            "not",
-            "or",
-            "plot",
-            "pop",
-            "push",
-            "ramb",
-            "ret",
-            "rol",
-            "romb",
-            "ror",
-            "rpix",
-            "sbc",
-            "sbk",
-            "sex",
-            "sm",
-            "sms",
-            "stb",
-            "stop",
-            "stw",
-            "sub",
-            "swap",
-            "to",
-            "umult",
-            "with",
-            "xor",
-        )
-
     private val pseudoKeywords =
         setOf(
+            "inline",
             "function",
             "endfunction",
             "call",
@@ -135,46 +48,59 @@ class CodeAnalyzer {
         fileName: String = "source.sgs",
     ): FileAnalysisResultDto {
         val scanner = CA65Scanner()
-        val tokenizedFile = scanner.tokenize(source)
-        tokenizedFile.uri = URI.create("./$fileName")
-
-        val symbolService = SymbolService()
-        symbolService.extractDefinitions(tokenizedFile)
-
-        val fileService =
-            object : FileService() {
-                override fun readLines(fileUri: URI?): TokenizedFile = tokenizedFile
-
-                override fun find(
-                    file: URI?,
-                    vararg optionalSearchPaths: URI?,
-                ): MutableList<URI> = mutableListOf(tokenizedFile.uri)
-            }
-
+        val tokenizedFile = scanner.tokenize(source, URI.create("./$fileName"))
         val rawLines = source.lines()
         val totalLines = rawLines.size
 
         val analysis = SfxProgramAnalyzer.analyze(tokenizedFile, rawLines)
-        val allocator = GraphColoringAllocator()
 
         val functionScopeDtos = mutableListOf<FunctionScopeDto>()
         val allBlockDtos = mutableListOf<CodeBlockDto>()
-        var blockIdx = 0
 
-        for (fn in analysis.functions) {
-            val fnAllocatedMap = mutableMapOf<String, String>()
-            for ((k, v) in fn.allocatedMap) {
-                fnAllocatedMap[k] = v.name
+        if (analysis.main != null) {
+            val main = analysis.main
+            val mainAllocatedMap = main.allocatedMap.mapValues { (_, v) -> v.name }
+            val mainIntervalsMap = main.intervals.filterValues { it.used() }
+
+            val mainIntervalDtos =
+                mainIntervalsMap.values
+                    .map { interval ->
+                        createIntervalDto(
+                            interval = interval,
+                            functionScope = "(main)",
+                            tokenizedFile = tokenizedFile,
+                            allocatedMap = mainAllocatedMap,
+                            interference = (main.interferences[interval.key] ?: emptySet()).map { keyToString(it) }.sorted(),
+                        )
+                    }.sortedWith(compareBy({ !it.isRegister }, { it.startLine }, { it.keyName }))
+
+            for (block in main.cfg.blocks) {
+                allBlockDtos.add(
+                    createBlockDto(
+                        block = block,
+                        functionScope = "(main)",
+                        tokenizedFile = tokenizedFile,
+                        activeIntervals = mainIntervalsMap,
+                        allocatedMap = mainAllocatedMap,
+                        interferences = main.interferences,
+                    ),
+                )
             }
 
+            functionScopeDtos.add(
+                FunctionScopeDto(
+                    name = "(main)",
+                    startLine = main.startLine,
+                    endLine = main.endLine,
+                    intervals = mainIntervalDtos,
+                    allocatedMap = mainAllocatedMap,
+                ),
+            )
+        }
+
+        for (fn in analysis.functions.sortedBy { it.startLine }) {
+            val fnAllocatedMap = fn.allocatedMap.mapValues { (_, v) -> v.name }
             val fnIntervalsMap = fn.intervals.filterValues { it.used() }
-            val fnPrecolored = mutableMapOf<IntervalKey, Constants.Register>()
-            for ((_, decl) in fn.declaredRegisters) {
-                if (decl.forcedRegister != null) {
-                    fnPrecolored[IntervalKey.LabelKey(decl.name)] = decl.forcedRegister
-                }
-            }
-            val fnInterference = allocator.buildInterferenceGraph(fnIntervalsMap, fnPrecolored)
 
             val fnIntervalDtos =
                 fnIntervalsMap.values
@@ -184,27 +110,21 @@ class CodeAnalyzer {
                             functionScope = fn.name,
                             tokenizedFile = tokenizedFile,
                             allocatedMap = fnAllocatedMap,
-                            interference = fnInterference.neighbors(interval.key).map { keyToString(it) }.sorted(),
+                            interference = (fn.interferences[interval.key] ?: emptySet()).map { keyToString(it) }.sorted(),
                         )
                     }.sortedWith(compareBy({ !it.isRegister }, { it.startLine }, { it.keyName }))
 
-            val fnGrapher = CA65Grapher(symbolService = symbolService, fileService = fileService)
-            val fnNode: CodeNode.FunctionStart? =
-                try {
-                    fnGrapher.graphFunction(fn.name)
-                } catch (e: Exception) {
-                    null
-                }
-
-            if (fnNode != null) {
-                fnNode.functionBody.traverse { node ->
-                    if (node is CodeNode.CodeBlock) {
-                        blockIdx++
-                        allBlockDtos.add(
-                            createBlockDto(node, "block-$blockIdx", fn.name, tokenizedFile, fnAllocatedMap, fnInterference),
-                        )
-                    }
-                }
+            for (block in fn.cfg.blocks) {
+                allBlockDtos.add(
+                    createBlockDto(
+                        block = block,
+                        functionScope = fn.name,
+                        tokenizedFile = tokenizedFile,
+                        activeIntervals = fnIntervalsMap,
+                        allocatedMap = fnAllocatedMap,
+                        interferences = fn.interferences,
+                    ),
+                )
             }
 
             functionScopeDtos.add(
@@ -218,71 +138,10 @@ class CodeAnalyzer {
             )
         }
 
-        if (analysis.main != null) {
-            val main = analysis.main
-            val mainAllocatedMap = mutableMapOf<String, String>()
-            for ((k, v) in main.allocatedMap) {
-                mainAllocatedMap[k] = v.name
-            }
-
-            val mainIntervalsMap = main.intervals.filterValues { it.used() }
-            val mainPrecolored = mutableMapOf<IntervalKey, Constants.Register>()
-            for ((_, decl) in main.declaredRegisters) {
-                if (decl.forcedRegister != null) {
-                    mainPrecolored[IntervalKey.LabelKey(decl.name)] = decl.forcedRegister
-                }
-            }
-            val mainInterference = allocator.buildInterferenceGraph(mainIntervalsMap, mainPrecolored)
-
-            val mainIntervalDtos =
-                mainIntervalsMap.values
-                    .map { interval ->
-                        createIntervalDto(
-                            interval = interval,
-                            functionScope = "(main)",
-                            tokenizedFile = tokenizedFile,
-                            allocatedMap = mainAllocatedMap,
-                            interference = mainInterference.neighbors(interval.key).map { keyToString(it) }.sorted(),
-                        )
-                    }.sortedWith(compareBy({ !it.isRegister }, { it.startLine }, { it.keyName }))
-
-            val mainGrapher = CA65Grapher(symbolService = symbolService, fileService = fileService)
-            val mainGraph: CodeGraph? =
-                try {
-                    mainGrapher.graph(tokenizedFile, main.startLine)
-                } catch (e: Exception) {
-                    null
-                }
-
-            if (mainGraph != null) {
-                mainGraph.traverse { node ->
-                    if (node is CodeNode.CodeBlock) {
-                        blockIdx++
-                        allBlockDtos.add(
-                            createBlockDto(node, "block-$blockIdx", "(main)", tokenizedFile, mainAllocatedMap, mainInterference),
-                        )
-                    }
-                }
-            }
-
-            functionScopeDtos.add(
-                0,
-                FunctionScopeDto(
-                    name = "(main)",
-                    startLine = main.startLine,
-                    endLine = main.endLine,
-                    intervals = mainIntervalDtos,
-                    allocatedMap = mainAllocatedMap,
-                ),
-            )
-        }
-
         val allIntervalDtos = functionScopeDtos.flatMap { it.intervals }
         val overallAllocatedMap = mutableMapOf<String, String>()
         for (scope in functionScopeDtos) {
-            for ((k, v) in scope.allocatedMap) {
-                overallAllocatedMap[k] = v
-            }
+            overallAllocatedMap.putAll(scope.allocatedMap)
         }
 
         val allLineEffects = mutableMapOf<Int, LineEffect>()
@@ -299,7 +158,7 @@ class CodeAnalyzer {
                 val tokens = tokenizedFile.getLineTokens(lineIdx) ?: emptyList()
 
                 val activeScope =
-                    functionScopeDtos.firstOrNull { lineIdx in it.startLine..it.endLine }
+                    functionScopeDtos.firstOrNull { it.name != "(main)" && lineIdx in it.startLine..it.endLine }
                         ?: functionScopeDtos.firstOrNull { it.name == "(main)" }
 
                 val effect = allLineEffects[lineIdx]
@@ -336,7 +195,7 @@ class CodeAnalyzer {
         val keyName = keyToString(interval.key)
         val isReg = interval.key is IntervalKey.RegisterKey
         val regName = (interval.key as? IntervalKey.RegisterKey)?.register?.name
-        val allocReg = if (isReg) regName else allocatedMap[keyName]
+        val allocReg = if (isReg) regName else allocatedMap[keyName.lowercase(Locale.ROOT)] ?: allocatedMap[keyName]
 
         val readsLoc =
             interval.reads.mapNotNull { lineNum ->
@@ -363,51 +222,60 @@ class CodeAnalyzer {
     }
 
     private fun createBlockDto(
-        node: CodeNode.CodeBlock,
-        id: String,
+        block: CfgBlock,
         functionScope: String,
         tokenizedFile: TokenizedFile,
+        activeIntervals: Map<IntervalKey, Interval>,
         allocatedMap: Map<String, String>,
-        interference: dev.secondsun.sfxoptimizer.InterferenceGraph,
+        interferences: Map<IntervalKey, Set<IntervalKey>>,
     ): CodeBlockDto {
-        val bStart =
-            node.lines
-                .firstOrNull()
-                ?.tokens
-                ?.firstOrNull()
-                ?.lineNumber ?: 0
-        val bEnd =
-            node.lines
-                .lastOrNull()
-                ?.tokens
-                ?.lastOrNull()
-                ?.lineNumber ?: bStart
+        val lineSet = block.lineIndices.toSet()
         val bIntervals =
-            node.intervals.values.filter { it.used() }.map { bInt ->
-                val keyName = keyToString(bInt.key)
-                val isReg = bInt.key is IntervalKey.RegisterKey
-                val regName = (bInt.key as? IntervalKey.RegisterKey)?.register?.name
-                val allocReg = if (isReg) regName else allocatedMap[keyName]
-                IntervalSpanDto(
-                    keyName = keyName,
-                    functionScope = functionScope,
-                    isRegister = isReg,
-                    registerName = regName,
-                    startLine = bInt.start,
-                    endLine = bInt.end,
-                    reads = bInt.reads.mapNotNull { findTokenLocationOnLine(tokenizedFile, it, keyName, isReg) },
-                    writes = bInt.writes.mapNotNull { findTokenLocationOnLine(tokenizedFile, it, keyName, isReg) },
-                    interferences = interference.neighbors(bInt.key).map { keyToString(it) }.sorted(),
-                    allocatedRegister = allocReg,
-                    isSpill = allocReg == "SPILL",
-                )
-            }
+            activeIntervals.values
+                .filter { intv ->
+                    intv.start <= block.endLine && intv.end >= block.startLine
+                }.map { bInt ->
+                    val keyName = keyToString(bInt.key)
+                    val isReg = bInt.key is IntervalKey.RegisterKey
+                    val regName = (bInt.key as? IntervalKey.RegisterKey)?.register?.name
+                    val allocReg = if (isReg) regName else allocatedMap[keyName.lowercase(Locale.ROOT)] ?: allocatedMap[keyName]
+                    IntervalSpanDto(
+                        keyName = keyName,
+                        functionScope = functionScope,
+                        isRegister = isReg,
+                        registerName = regName,
+                        startLine = maxOf(bInt.start, block.startLine),
+                        endLine = minOf(bInt.end, block.endLine),
+                        reads =
+                            bInt.reads.filter { it in lineSet }.mapNotNull {
+                                findTokenLocationOnLine(
+                                    tokenizedFile,
+                                    it,
+                                    keyName,
+                                    isReg,
+                                )
+                            },
+                        writes =
+                            bInt.writes.filter { it in lineSet }.mapNotNull {
+                                findTokenLocationOnLine(
+                                    tokenizedFile,
+                                    it,
+                                    keyName,
+                                    isReg,
+                                )
+                            },
+                        interferences = (interferences[bInt.key] ?: emptySet()).map { keyToString(it) }.sorted(),
+                        allocatedRegister = allocReg,
+                        isSpill = allocReg == "SPILL",
+                    )
+                }
+
         return CodeBlockDto(
-            id = id,
-            startLine = bStart,
-            endLine = bEnd,
-            entrances = node.entrances.map { it.hashCode().toString() },
-            exits = node.exits.map { it.hashCode().toString() },
+            id = block.id,
+            startLine = block.startLine,
+            endLine = block.endLine,
+            entrances = block.entrances,
+            exits = block.exits,
             intervals = bIntervals,
         )
     }
@@ -433,7 +301,7 @@ class CodeAnalyzer {
             cssClass = "tok-string"
         } else if (text.startsWith("#") || text.startsWith("$") || text.matches(Regex("^[0-9].*"))) {
             cssClass = "tok-number"
-        } else if (superFxMnemonics.contains(lower)) {
+        } else if (SuperFxIsa.isMnemonic(lower)) {
             cssClass = "tok-insn"
         } else if (pseudoKeywords.contains(lower)) {
             cssClass = "tok-keyword"
@@ -509,11 +377,9 @@ class CodeAnalyzer {
         if (matchedToken != null) {
             return LocationDto(line = lineNum, colStart = matchedToken.startIndex, colEnd = matchedToken.endIndex)
         }
-        val insnToken =
-            tokens.firstOrNull { t ->
-                val txt = t.text().lowercase(Locale.ROOT)
-                superFxMnemonics.contains(txt) || txt == "condensed_lmult"
-            }
+        val codeTokens = SfxLivenessAnalyzer.getCodeTokens(file, lineNum)
+        val (_, bodyTokens) = SfxLivenessAnalyzer.splitLabelPrefix(codeTokens)
+        val insnToken = bodyTokens.firstOrNull()
         return if (insnToken != null) {
             LocationDto(line = lineNum, colStart = insnToken.startIndex, colEnd = insnToken.endIndex)
         } else {

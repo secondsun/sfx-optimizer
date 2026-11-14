@@ -37,5 +37,13 @@ The pre-allocation pass that replaces a `call` with the callee body, alpha-renam
 _Avoid_: Macro expansion, call elimination
 
 **Peephole Pass**:
-The post-allocation rewrite over lowered assembly (`iwt`→`ibt` narrowing, self-move and redundant `from r0` removal, power-of-two `mult` reduction).
+The post-allocation rewrite over lowered assembly (`iwt`→`ibt` narrowing with `#<(-k)` byte masking, self-move and redundant `from r0` removal, power-of-two `mult` reduction).
 _Avoid_: Cleanup pass, post-optimizer
+
+**Scope Control Flow Graph (`ScopeCfg`)**:
+The immutable basic-block graph (`CfgBlock` nodes with matching `"block-N"` entrance/exit edge IDs, 1-instruction SuperFX branch delay-slot folding, and `NaturalLoop` back-edge spans) constructed by `SfxCfgBuilder` for a single isolated `(main)` or `[inline] function` scope.
+_Avoid_: Mutable CodeGraph, CodeNode tree
+
+**Expanded Source Provenance (`ExpandedSource`)**:
+The macro- or include-expanded instruction stream paired 1-to-1 with 1-based `SourceOrigin(uri, line1)` coordinates so post-expansion passes (`StackDepthTracker`, `SfxCompiler`) report diagnostics against exact original source lines.
+_Avoid_: Synthetic line offset, flattened source

@@ -11,8 +11,6 @@ import org.junit.jupiter.api.Test
 class StackDepthTrackerTest {
     private val tracker = StackDepthTracker()
 
-    private fun expandAndGraph(source: String) = graphExpanded(source)
-
     @Test
     fun `test push and pop tracking`() {
         val program =
@@ -24,12 +22,10 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val graph = expandAndGraph(program)
-        val result = tracker.track(graph.startNode)
+        val result = tracker.trackSource(program).getValue("(main)")
 
         assertEquals(4, result.maxDepth)
-        val exitDepth = result.blockExitDepths[graph.startNode.main]
-        assertEquals(0, exitDepth)
+        assertEquals(0, result.blockExitDepths.values.last())
     }
 
     @Test
@@ -42,11 +38,10 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val graph = expandAndGraph(program)
-        val result = tracker.track(graph.startNode)
+        val result = tracker.trackSource(program).getValue("(main)")
 
         assertEquals(8, result.maxDepth)
-        assertEquals(0, result.blockExitDepths[graph.startNode.main])
+        assertEquals(0, result.blockExitDepths.values.last())
     }
 
     @Test
@@ -60,22 +55,17 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val graph = expandAndGraph(program)
-        val result = tracker.track(graph.startNode)
+        val expanded = CA65MacroExpander().expandWithProvenance(CA65Scanner().tokenize(program))
+        val result = tracker.trackExpanded(expanded).getValue("(main)")
 
-        // slotBaseOffset = 2 (e.g. 2 bytes below baseline)
-        // Before push: delta_sp = 0, displacement = 2 + 0 = 2
-        // After push (where nop executes): delta_sp = 2, displacement = 2 + 2 = 4
-        // After alloc 4: delta_sp = 6, displacement = 2 + 6 = 8
         assertEquals(6, result.maxDepth)
-        val nopLines =
-            result.lineDepths.filterKeys { line ->
-                graph.startNode.main.lines.any {
-                    it.line.contains("nop") && it.tokens.firstOrNull()?.lineNumber == line
-                }
+        val firstNop =
+            (0 until expanded.tokenizedFile.textLines()).first { line ->
+                expanded.tokenizedFile
+                    .getLine(line)
+                    .line
+                    .trim() == "nop"
             }
-        assertTrue(nopLines.isNotEmpty())
-        val firstNop = nopLines.keys.minOrNull()!!
         assertEquals(2, result.lineDepths[firstNop])
         assertEquals(4, result.effectiveDisplacement(slotBaseOffset = 2, line = firstNop))
     }
@@ -90,8 +80,7 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val graph = expandAndGraph(program)
-        val result = tracker.track(graph.startNode)
+        val result = tracker.trackSource(program).getValue("(main)")
 
         // for backs up r12 and r13 (4 bytes)
         assertEquals(4, result.maxDepth)
@@ -100,7 +89,7 @@ class StackDepthTrackerTest {
     }
 
     @Test
-    fun `test mismatched stack depth branch throws IllegalStateException`() {
+    fun `test mismatched stack depth branch throws IllegalStateException in strict mode`() {
         val program =
             """
                 beq skip
@@ -111,11 +100,9 @@ class StackDepthTrackerTest {
                 stop
             """.trimIndent()
 
-        val graph = expandAndGraph(program)
-
         val exception =
             assertThrows(IllegalStateException::class.java) {
-                tracker.track(graph.startNode)
+                tracker.trackSource(program, strict = true)
             }
         assertTrue(exception.message!!.contains("Mismatched stack depth at branch target"))
     }
@@ -136,14 +123,12 @@ class StackDepthTrackerTest {
                 stop
             """.trimIndent()
 
-        val graph = expandAndGraph(program)
-        val result = tracker.track(graph.startNode)
-
+        val result = tracker.trackSource(program).getValue("(main)")
         assertEquals(2, result.maxDepth)
     }
 
     @Test
-    fun `test trackGraph with function`() {
+    fun `test trackSource with function`() {
         val program =
             """
             function test_fn
@@ -156,49 +141,59 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
-        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call test_fn") == true } ?: 0
-        val graph = graphExpanded(program, callLine)
-        val results = tracker.trackGraph(graph)
+        val results = tracker.trackSource(program)
 
-        val fn = graph.getFunction("test_fn")!!
-        val fnResult = results[fn]!!
+        val fnResult = results.getValue("test_fn")
         assertEquals(2, fnResult.maxDepth)
         assertEquals(0, fnResult.blockExitDepths.values.last())
 
-        val mainResult = results[graph.startNode]!!
+        val mainResult = results.getValue("(main)")
         assertEquals(0, mainResult.maxDepth)
     }
 
     @Test
-    fun `test auditStack detects stack leak on return`() {
+    fun `test auditFindings emits exact 1-based line after macro expansion and no duplicate function diagnostics`() {
         val program =
             """
+            ; line 1 comment
+            .macro noop_macro
+                nop
+            .endmacro
+
             function leaking_fn
+                for 4
+                    noop_macro
+                endfor
                 gsu_stack_push r4
                 return
             endfunction
 
             call leaking_fn
+            call leaking_fn
             stop
             """.trimIndent()
 
-        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
-        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call leaking_fn") == true } ?: 0
-        val graph = graphExpanded(program, callLine)
+        val tokenized = CA65Scanner().tokenize(program)
+        val violations = tracker.auditFindings(tokenized)
 
-        val violations = tracker.auditStack(graph)
+        // Audited once per scope despite two calls from (main), and `return` is on exact 1-based line 11!
         assertEquals(1, violations.size)
         val v = violations[0]
         assertEquals("STACK_LEAK_ON_RETURN", v.rule)
+        assertEquals(11, v.line)
         assertEquals(2, v.displacement)
         assertTrue(v.message.contains("Δ_SP = 2 bytes"))
+
+        val diagnostics = tracker.auditFile(tokenized)
+        assertEquals(1, diagnostics.size)
+        assertEquals(11, diagnostics[0].line())
     }
 
     @Test
-    fun `test auditStack detects divergent branch depth without throwing`() {
+    fun `test auditFindings detects divergent branch depth with exact 1-based source line`() {
         val program =
             """
+                ; line 1
                 beq skip
                 nop
                 gsu_stack_push r4
@@ -207,30 +202,32 @@ class StackDepthTrackerTest {
                 stop
             """.trimIndent()
 
-        val graph = expandAndGraph(program)
-        val violations = tracker.auditStack(graph)
+        val violations = tracker.auditFindings(CA65Scanner().tokenize(program))
         assertEquals(1, violations.size)
         val v = violations[0]
         assertEquals("DIVERGENT_STACK_DEPTH", v.rule)
+        assertEquals(4, v.line)
     }
 
     @Test
-    fun `test auditFile detects stack leak directly from raw source tokens`() {
+    fun `test zero-byte label and alt1 preserve modal r10 state`() {
         val program =
             """
-            function leaking_function
-                gsu_stack_push r4
+            function modal_stack_fn
+                with r10
+            @after_with:
+                add #4
+                with r10
+                alt1
+                sub #4
                 return
             endfunction
             """.trimIndent()
 
-        val tokenized = CA65Scanner().tokenize(program)
-        val diagnostics = tracker.auditFile(tokenized)
-
-        assertEquals(1, diagnostics.size)
-        val diag = diagnostics[0]
-        assertEquals("STACK_LEAK_ON_RETURN", diag.code())
-        assertTrue(diag.message().contains("Δ_SP = 2 bytes"))
+        val results = tracker.trackSource(program, strict = false)
+        val fnResult = results.getValue("modal_stack_fn")
+        assertEquals(4, fnResult.maxDepth)
+        assertTrue(fnResult.violations.isEmpty(), "Expected balanced stack across label and alt1, got ${fnResult.violations}")
     }
 
     @Test
@@ -251,21 +248,12 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
-        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call long_jump_fn") == true } ?: 0
-        val graph = graphExpanded(program, callLine)
-        val results = tracker.trackGraph(graph)
-
-        val fn = graph.getFunction("long_jump_fn")!!
-        val fnResult = results[fn]!!
+        val results = tracker.trackSource(program, strict = false)
+        val fnResult = results.getValue("long_jump_fn")
         assertEquals(2, fnResult.maxDepth)
         assertEquals(0, fnResult.violations.size)
 
-        val violations = tracker.auditStack(graph)
-        assertEquals(0, violations.size)
-
-        val rawTokenized = CA65Scanner().tokenize(program)
-        val diagnostics = tracker.auditFile(rawTokenized)
+        val diagnostics = tracker.auditFile(CA65Scanner().tokenize(program))
         assertTrue(diagnostics.none { it.code() == "STACK_LEAK_ON_RETURN" })
     }
 
@@ -286,21 +274,10 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
-        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call leaking_long_jump_fn") == true } ?: 0
-        val graph = graphExpanded(program, callLine)
-        val results = tracker.trackGraph(graph)
-
-        val fn = graph.getFunction("leaking_long_jump_fn")!!
-        val fnResult = results[fn]!!
-        assertEquals(2, fnResult.maxDepth)
-        assertEquals(1, fnResult.violations.size)
-        assertEquals("STACK_LEAK_ON_RETURN", fnResult.violations[0].rule)
-        assertEquals(2, fnResult.violations[0].displacement)
-
-        val violations = tracker.auditStack(graph)
+        val violations = tracker.auditFindings(CA65Scanner().tokenize(program))
         assertEquals(1, violations.size)
         assertEquals("STACK_LEAK_ON_RETURN", violations[0].rule)
+        assertEquals(7, violations[0].line)
         assertEquals(2, violations[0].displacement)
         assertTrue(violations[0].message.contains("Δ_SP = 2 bytes"))
     }
@@ -319,10 +296,7 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
-        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call dynamic_dispatch_fn") == true } ?: 0
-        val graph = graphExpanded(program, callLine)
-        val violations = tracker.auditStack(graph)
+        val violations = tracker.auditFindings(CA65Scanner().tokenize(program))
         assertTrue(violations.none { it.rule == "STACK_LEAK_ON_RETURN" })
     }
 
@@ -340,12 +314,10 @@ class StackDepthTrackerTest {
             stop
             """.trimIndent()
 
-        val expanded = CA65MacroExpander().expand(CA65Scanner().tokenize(program))
-        val callLine = (0 until expanded.textLines()).find { expanded.getLineText(it)?.contains("call r11_return_fn") == true } ?: 0
-        val graph = graphExpanded(program, callLine)
-        val violations = tracker.auditStack(graph)
+        val violations = tracker.auditFindings(CA65Scanner().tokenize(program))
         assertEquals(1, violations.size)
         assertEquals("STACK_LEAK_ON_RETURN", violations[0].rule)
+        assertEquals(3, violations[0].line)
         assertEquals(2, violations[0].displacement)
     }
 }

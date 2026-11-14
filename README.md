@@ -7,7 +7,7 @@ It targets projects adhering to `X-GSU` and `libSFX` conventions.
 
 ## Features
 
-- **Control Flow Graph (CFG) Construction**: Parses ca65 assembly and pseudo-macros into structured basic blocks (`CodeBlock`, `CallBlock`, `FunctionStart`, etc.).
+- **Control Flow Graph (CFG) Construction**: Parses ca65 assembly and X-GSU functions (`[inline] function`) into immutable per-scope basic blocks (`ScopeCfg`, `CfgBlock`, `NaturalLoop`) with SuperFX 1-instruction branch delay-slot handling and 1-based `ExpandedSource` line provenance.
 - **Liveness Analysis**: Calculates precise live ranges (start/end lines, read/write access points) for physical hardware registers and pseudo-variables.
 - **Graph-Coloring Register Allocation**: Implements Chaitin-Briggs / Kempe heuristic graph coloring to map pseudo-variables to hardware SuperFX registers (`R1`–`R9`, `R11`–`R13`), handling fixed registers, pre-colored constraints, and stack spills.
 - **Strict Function Scoping**: Isolates live ranges and register allocation across function boundaries.

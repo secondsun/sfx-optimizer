@@ -306,4 +306,122 @@ class SfxCompilerTest {
             assertEquals(fnAnalysis.returnReg, compiledFn.returnReg, "Return register differs for function $fnName")
         }
     }
+
+    @Test
+    fun `test plot implicit r1 write sbk sreg read and zero-byte label modal preservation`() {
+        val source =
+            """
+            .macro write_pair dst, src
+                to dst
+                add src
+                with r4
+                inc r4
+            .endmacro
+
+            function raster_step x0, val : out
+                register acc, live_across_macro
+                iwt live_across_macro, #7
+                move r1, x0
+                plot
+                from val
+                sbk
+                with acc
+            @carry_lbl:
+                rol
+                write_pair out, acc
+                from out
+                to out
+                add live_across_macro
+                return out
+            endfunction
+            """.trimIndent()
+
+        val tokenized =
+            dev.secondsun.retro.util
+                .CA65Scanner()
+                .tokenize(source)
+        val analysis =
+            dev.secondsun.sfxoptimizer.analysis.SfxProgramAnalyzer
+                .analyze(tokenized, source.lines())
+        val fn = analysis.functions.single { it.name == "raster_step" }
+
+        // plot clobbers R1; write_pair macro clobbers R4 -> live_across_macro must avoid R4!
+        assertTrue(Constants.Register.R1 in fn.clobberedRegisters)
+        assertTrue(Constants.Register.R4 in fn.clobberedRegisters)
+        assertFalse(fn.allocatedMap["live_across_macro"] == Constants.Register.R4)
+
+        // Zero-byte label @carry_lbl: must NOT clear `with acc` before `rol`, and `from val` feeds `sbk`
+        val accInterval =
+            fn.intervals.getValue(
+                dev.secondsun.sfxoptimizer.IntervalKey
+                    .LabelKey("acc"),
+            )
+        val rolLine = source.lines().indexOfFirst { it.trim() == "rol" }
+        assertTrue(rolLine in accInterval.reads && rolLine in accInterval.writes)
+        val valInterval =
+            fn.intervals.getValue(
+                dev.secondsun.sfxoptimizer.IntervalKey
+                    .LabelKey("val"),
+            )
+        val sbkLine = source.lines().indexOfFirst { it.trim() == "sbk" }
+        assertTrue(sbkLine in valInterval.reads)
+    }
+
+    @Test
+    fun `cfg liveness allocates variable in dead gap between macro clobbers and later overwrites`() {
+        val source =
+            """
+            .struct dummy_vec
+                xPos .word
+                yPos .word
+            .endstruct
+
+            .macro clobber_all_regs
+                ibt r1, #0
+                ibt r2, #0
+                ibt r3, #0
+                ibt r4, #0
+                ibt r5, #0
+                ibt r6, #0
+                ibt r7, #0
+                ibt r8, #0
+                ibt r9, #0
+                ibt r11, #0
+                ibt r12, #0
+                ibt r13, #0
+                jmp r11
+                nop
+            .endmacro
+
+            clobber_all_regs
+
+            GSU_Code:
+                register idx_val
+                ibt r7, #4
+                to idx_val
+                ldw (r7)
+                from idx_val
+                sub #1
+                bne @done
+                nop
+                ibt r1, #1
+                ibt r2, #2
+                ibt r3, #3
+                ibt r4, #4
+                ibt r5, #5
+                ibt r6, #6
+                ibt r7, #7
+                ibt r8, #8
+                ibt r9, #9
+                ibt r11, #11
+                ibt r12, #12
+                ibt r13, #13
+            @done:
+                stop
+            """.trimIndent()
+
+        val result = SfxCompiler().compileSource(source)
+        assertTrue(result.warnings.isEmpty(), "Expected zero unresolved macro warnings on .struct fields: ${result.warnings}")
+        assertTrue("idx_val" in result.mainAllocations, "Expected idx_val to be allocated in dead gap")
+    }
 }

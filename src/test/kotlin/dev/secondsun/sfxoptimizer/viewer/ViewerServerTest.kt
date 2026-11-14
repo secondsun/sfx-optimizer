@@ -1,10 +1,9 @@
 package dev.secondsun.sfxoptimizer.viewer
 
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -174,75 +173,61 @@ class ViewerServerTest {
         val port = server.start()
         assertTrue(port >= 18880)
 
-        val client = HttpClient.newHttpClient()
+        fun httpRequest(
+            url: String,
+            method: String = "GET",
+            body: String? = null,
+        ): Pair<Int, String> {
+            val conn = URI.create(url).toURL().openConnection() as HttpURLConnection
+            conn.requestMethod = method
+            if (body != null) {
+                conn.doOutput = true
+                conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+            }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else (conn.errorStream ?: conn.inputStream)
+            val text = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+            conn.disconnect()
+            return code to text
+        }
 
         try {
             // 1. Root page
-            val rootReq =
-                HttpRequest
-                    .newBuilder()
-                    .uri(URI.create("http://127.0.0.1:$port/"))
-                    .GET()
-                    .build()
-            val rootRes = client.send(rootReq, HttpResponse.BodyHandlers.ofString())
-            assertEquals(200, rootRes.statusCode())
-            assertTrue(rootRes.body().contains("SuperFX Code & Liveness Viewer"))
+            val (rootStatus, rootBody) = httpRequest("http://127.0.0.1:$port/")
+            assertEquals(200, rootStatus)
+            assertTrue(rootBody.contains("SuperFX Code & Liveness Viewer"))
 
             // 2. CSS resource
-            val cssReq =
-                HttpRequest
-                    .newBuilder()
-                    .uri(URI.create("http://127.0.0.1:$port/viewer.css"))
-                    .GET()
-                    .build()
-            val cssRes = client.send(cssReq, HttpResponse.BodyHandlers.ofString())
-            assertEquals(200, cssRes.statusCode())
-            assertTrue(cssRes.body().contains("--line-height"))
+            val (cssStatus, cssBody) = httpRequest("http://127.0.0.1:$port/viewer.css")
+            assertEquals(200, cssStatus)
+            assertTrue(cssBody.contains("--line-height"))
 
             // 3. JS resource
-            val jsReq =
-                HttpRequest
-                    .newBuilder()
-                    .uri(URI.create("http://127.0.0.1:$port/viewer.js"))
-                    .GET()
-                    .build()
-            val jsRes = client.send(jsReq, HttpResponse.BodyHandlers.ofString())
-            assertEquals(200, jsRes.statusCode())
-            assertTrue(jsRes.body().contains("LINE_HEIGHT"))
+            val (jsStatus, jsBody) = httpRequest("http://127.0.0.1:$port/viewer.js")
+            assertEquals(200, jsStatus)
+            assertTrue(jsBody.contains("LINE_HEIGHT"))
 
             // 4. API files
-            val filesReq =
-                HttpRequest
-                    .newBuilder()
-                    .uri(URI.create("http://127.0.0.1:$port/api/files"))
-                    .GET()
-                    .build()
-            val filesRes = client.send(filesReq, HttpResponse.BodyHandlers.ofString())
-            assertEquals(200, filesRes.statusCode())
-            assertTrue(filesRes.body().contains("test.sgs"))
+            val (filesStatus, filesBody) = httpRequest("http://127.0.0.1:$port/api/files")
+            assertEquals(200, filesStatus)
+            assertTrue(filesBody.contains("test.sgs"))
 
             // 5. API load file
-            val fileLoadReq =
-                HttpRequest
-                    .newBuilder()
-                    .uri(URI.create("http://127.0.0.1:$port/api/file?path=${sampleFile.absolutePath}"))
-                    .GET()
-                    .build()
-            val fileLoadRes = client.send(fileLoadReq, HttpResponse.BodyHandlers.ofString())
-            assertEquals(200, fileLoadRes.statusCode())
-            assertTrue(fileLoadRes.body().contains("\"fileName\":\"test.sgs\""))
-            assertTrue(fileLoadRes.body().contains("\"count\""))
+            val (fileLoadStatus, fileLoadBody) =
+                httpRequest("http://127.0.0.1:$port/api/file?path=${sampleFile.absolutePath}")
+            assertEquals(200, fileLoadStatus)
+            assertTrue(fileLoadBody.contains("\"fileName\":\"test.sgs\""))
+            assertTrue(fileLoadBody.contains("\"count\""))
 
             // 6. API analyze POST
-            val analyzeReq =
-                HttpRequest
-                    .newBuilder()
-                    .uri(URI.create("http://127.0.0.1:$port/api/analyze"))
-                    .POST(HttpRequest.BodyPublishers.ofString("iwt r1, #5\nstw (r1)"))
-                    .build()
-            val analyzeRes = client.send(analyzeReq, HttpResponse.BodyHandlers.ofString())
-            assertEquals(200, analyzeRes.statusCode())
-            assertTrue(analyzeRes.body().contains("\"r1\""))
+            val (analyzeStatus, analyzeBody) =
+                httpRequest(
+                    url = "http://127.0.0.1:$port/api/analyze",
+                    method = "POST",
+                    body = "iwt r1, #5\nstw (r1)",
+                )
+            assertEquals(200, analyzeStatus)
+            assertTrue(analyzeBody.contains("\"r1\""))
         } finally {
             server.stop()
             tempDir.deleteRecursively()
@@ -355,6 +340,38 @@ class ViewerServerTest {
             val result = analyzer.analyze(f.readText(), f.name)
             assertTrue(result.totalLines > 0, "${f.name} should have lines")
             assertNotNull(result.fileName)
+            val blockIds = result.blocks.map { it.id }.toSet()
+            for (b in result.blocks) {
+                assertTrue(b.entrances.all { it in blockIds }, "Block entrances in ${f.name} must reference valid block IDs")
+                assertTrue(b.exits.all { it in blockIds }, "Block exits in ${f.name} must reference valid block IDs")
+            }
+        }
+    }
+
+    @Test
+    fun `test inline function scope discovery and coherent block edges`() {
+        val program =
+            """
+            inline function clamp_pos x : res
+                from x
+                bpl @keep
+                nop
+                ibt res, #0
+                return res
+            @keep:
+                move res, x
+                return res
+            endfunction
+            """.trimIndent()
+        val result = CodeAnalyzer().analyze(program, "inline_clamp.sgs")
+        assertEquals(1, result.functions.size)
+        assertEquals("clamp_pos", result.functions[0].name)
+        assertTrue(result.blocks.size >= 2)
+        val ids = result.blocks.map { it.id }.toSet()
+        assertTrue(result.blocks.any { it.exits.isNotEmpty() })
+        for (b in result.blocks) {
+            assertTrue(b.entrances.all { it in ids })
+            assertTrue(b.exits.all { it in ids })
         }
     }
 }

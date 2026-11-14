@@ -13,34 +13,30 @@ The optimizer processes assembly source files containing high-level register pse
 ```
               [CA65 Source with Pseudo-Macros]
                              │
-                             ▼ (dev.secondsun:retro-common)
-                      [CA65Scanner]  ──> TokenizedFile
+                             ▼ (compiler/SfxInliner.kt + .include expansion)
+                   [CA65Scanner] ──> TokenizedFile
+                             │
+                             ▼ (analysis/SfxCfgBuilder.kt + SfxProgramAnalyzer.kt)
+                     [ScopeCfg & Liveness]
                              │
                              ├─────────────────────────────────────────────────┐
                              │                                                 │
-                             ▼ (graphbuilder/CA65Grapher.kt)                   ▼ (viewer/CodeAnalyzer.kt)
-                       [CodeGraph]                                     [Liveness & Scopes]
+                             ▼ (Allocator.kt)                                  ▼ (viewer/CodeAnalyzer.kt)
+               [Interference & Graph Coloring]                         [ViewerDto Serialization]
                              │                                                 │
-                             ▼ (Interval.kt)                                   ▼ (Allocator.kt)
-                    [Liveness Analysis]                              [Interference & Coloring]
-                             │                                                 │
-                             ▼ (Allocator.kt)                                  ▼ (viewer/ViewerDto.kt)
-                   [Interference Graph]                             [JSON DTO Serialization]
-                             │                                                 │
-                             ▼                                                 ▼ (viewer/ViewerServer.kt)
-                   [Register Assignment]                            [Interactive Web UI]
-                             │                                       (Swimlanes, Popovers, SVG Links)
-                             ▼
-                   [Optimized CA65 Output]
+                             ▼ (compiler/SfxCompiler.kt + Peephole)            ▼ (viewer/ViewerServer.kt)
+                   [Optimized CA65 Output]                             [Interactive Web UI]
 ```
 
 ### Key Modules & Files
-- [`CA65Grapher.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/graphbuilder/CA65Grapher.kt): Parses tokens and constructs CFG blocks (`CodeBlock`, `CallBlock`, `FunctionStart`, `End`).
-- [`CodeGraph.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/graphnode/CodeGraph.kt): Directed graph representing program flow, entry point, functions, and exits.
+- [`SfxCfgBuilder.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxCfgBuilder.kt): Constructs immutable per-scope Control Flow Graphs (`ScopeCfg`, `CfgBlock`, `NaturalLoop`) with delay-slot and natural-loop extraction.
+- [`SfxProgramAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxProgramAnalyzer.kt) & [`SfxLivenessAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxLivenessAnalyzer.kt): Bottom-up scope orchestration, instruction/macro effect modeling, live-range intervals, and CFG backward dataflow interference.
 - [`Interval.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Interval.kt): Encapsulates live range start/end and read/write access points for register keys and labels.
 - [`Allocator.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Allocator.kt): Houses register allocation, interference graph generation, Chaitin-Briggs / Kempe graph coloring, pre-colored constraints, and spill handling.
+- [`SfxCompiler.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxCompiler.kt), [`SfxInliner.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxInliner.kt), & [`SfxPeepholeOptimizer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxPeepholeOptimizer.kt): Pre-allocation function inlining, parallel-move call lowering, loop-invariant caller-save hoisting, and SuperFX peephole optimization.
+- [`CA65MacroExpander.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/macro/CA65MacroExpander.kt) & [`StackDepthTracker.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/stack/StackDepthTracker.kt): Source-mapped macro expansion (`SourceOrigin`) and `ScopeCfg`-backed `R10` stack displacement verification.
 - [`Parser.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Parser.kt): Hardware register definitions (`Constants.Register`), register lookup, and parsing utilities.
-- [`CodeAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/CodeAnalyzer.kt): Analyzes assembly source for the viewer, calculating function boundaries, instruction effects (explicit and implicit), live ranges, interference sets, and register allocations.
+- [`CodeAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/CodeAnalyzer.kt): Adapts `SfxProgramAnalyzer` results into viewer DTOs (`ViewerDto.kt`).
 - [`ViewerServer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/ViewerServer.kt): Lightweight embedded HTTP server providing REST API endpoints (`/api/analyze`, `/api/files`, `/api/file`) and static web assets.
 - [`src/main/resources/viewer/`](src/main/resources/viewer/): Frontend assets (`index.html`, `viewer.css`, `viewer.js`) featuring interactive SVG connection curves, swimlanes, and pinned detail popovers.
 
@@ -145,13 +141,13 @@ Always use the included Maven wrapper (`./mvnw`):
 ## 6. Coding Standards & Contributor Guidelines
 
 1. **Kotlin Idioms (Kotlin 2.4+ / Java 26)**:
-   - Use `sealed interface` or `sealed class` for algebraic data types (`AllocationResult`, `CodeNode`, `IntervalKey`).
+   - Use `sealed interface` or `sealed class` for algebraic data types (`AllocationResult`, `CallArg`, `IntervalKey`).
    - Use `data object` for singleton states in sealed hierarchies.
    - Prefer immutable collections (`List`, `Set`, `Map`) except for internal allocation and graph structures.
    - Use `Register.entries` rather than `Register.values()`.
 
 2. **Testing Guardrails**:
-   - Code block test snippets live in `src/test/resources/code_blocks/` as `.sgs` files. When adding new syntax features or test cases in `CodeBlockTests.kt`, add corresponding test snippets in this directory so they can be inspected in the viewer.
+   - Code block test snippets live in `src/test/resources/code_blocks/` as `.sgs` files. When adding new syntax features or test cases in `SfxCompilerTest.kt` or `ViewerServerTest.kt`, add corresponding test snippets in this directory so they can be inspected in the viewer.
    - Upstream test fixtures live in `src/test/resources/homebrew/` (`X-GSU` and `libSFX`). Do not modify these assembly files unless writing tests specifically targeting new syntax.
    - All tests live in `dev.secondsun.sfxoptimizer` matching the package structure.
    - Follow Test-Driven Development (TDD): write or un-ignore test cases before expanding `Allocator.kt` or `CodeAnalyzer.kt`.

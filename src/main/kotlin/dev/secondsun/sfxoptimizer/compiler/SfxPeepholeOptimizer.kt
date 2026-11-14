@@ -1,5 +1,6 @@
 package dev.secondsun.sfxoptimizer.compiler
 
+import dev.secondsun.retro.util.sfx.SuperFxIsa
 import dev.secondsun.sfxoptimizer.analysis.SfxLivenessAnalyzer
 import java.util.Locale
 
@@ -7,15 +8,15 @@ import java.util.Locale
  * Post-allocation peephole pass over a lowered SuperFX instruction stream.
  *
  * Transformations:
- * - `iwt Rn, #imm` -> `ibt Rn, #imm` for literal constants in -128..127
+ * - `iwt Rn, #imm` -> `ibt Rn, #imm` (`0..127`) or `ibt Rn, #<(imm)` (`-128..-1`, satisfying `GSU_Assembler.i` byte bounds)
  * - removal of `move Rx, Rx` outside branch delay slots
- * - removal of redundant `from r0` prefixes
+ * - removal of redundant `from r0` prefixes before `Sreg`-reading instructions
  * - `with Rn; mult #2` / `mult #4` strength reduction to `add Rn` (when flags are not consumed)
  *
  * Lines inside `.macro` definitions are never modified.
  */
 object SfxPeepholeOptimizer {
-    private val BRANCHES =
+    private val DELAY_SLOT_CARRIERS =
         setOf(
             "bra",
             "beq",
@@ -39,33 +40,7 @@ object SfxPeepholeOptimizer {
     private val CONDITIONAL_BRANCHES =
         setOf("beq", "bne", "bcc", "bcs", "bpl", "bmi", "bvc", "bvs", "blt", "bge")
 
-    /** Instructions that read Sreg implicitly when no `from` prefix is given. */
-    private val SREG_READERS =
-        setOf(
-            "add",
-            "adc",
-            "sub",
-            "sbc",
-            "and",
-            "or",
-            "xor",
-            "bic",
-            "not",
-            "lsr",
-            "asr",
-            "rol",
-            "ror",
-            "swap",
-            "lob",
-            "hib",
-            "sex",
-            "mult",
-            "umult",
-            "fmult",
-            "lmult",
-        )
-
-    private val LINE_REGEX = Regex("""^(\s*)((?:[@\w.]+:\s*)?)([^;]*?)\s*(;.*)?$""")
+    private val LINE_REGEX = Regex("""^(\s*)((?:[@\w.]+:\s*|\s*:\s*)?)([^;]*?)\s*(;.*)?$""")
     private val IWT_REGEX = Regex("""^iwt\s+(r\d+)\s*,\s*#?\s*(.+)$""", RegexOption.IGNORE_CASE)
     private val MOVE_REGEX = Regex("""^move\s+(r\d+)\s*,\s*(r\d+)$""", RegexOption.IGNORE_CASE)
     private val WITH_REGEX = Regex("""^with\s+(r\d+)$""", RegexOption.IGNORE_CASE)
@@ -117,13 +92,17 @@ object SfxPeepholeOptimizer {
         return if (negative) -value else value
     }
 
+    private fun readsSreg(mnemonic: String?): Boolean {
+        if (mnemonic == null) return false
+        return SuperFxIsa.lookup(mnemonic).map { it.readsSreg() }.orElse(false)
+    }
+
     fun optimize(source: String): String {
         val lines = source.lines()
         val macroLines = SfxLivenessAnalyzer.findMacroDefinitionLines(lines)
         val out = ArrayList<String?>(lines.size)
         out.addAll(lines)
 
-        // Index of the most recent instruction-bearing line before i, or -1
         fun previousInstruction(i: Int): Int {
             var j = i - 1
             while (j >= 0) {
@@ -149,7 +128,7 @@ object SfxPeepholeOptimizer {
             if (prev < 0) return false
             val pp = parse(out[prev]!!) ?: return false
             val mn = pp.mnemonic
-            if (mn in BRANCHES) return true
+            if (mn in DELAY_SLOT_CARRIERS) return true
             return mn == "iwt" &&
                 IWT_REGEX
                     .matchEntire(pp.code)
@@ -164,12 +143,14 @@ object SfxPeepholeOptimizer {
             val p = parse(raw) ?: continue
             if (p.code.isEmpty()) continue
 
-            // 1. iwt -> ibt
+            // 1. iwt -> ibt (-128..-1 masked as #<(imm) for GSU_Assembler.i; 0..127 direct #imm)
             IWT_REGEX.matchEntire(p.code)?.let { m ->
                 val reg = m.groupValues[1].lowercase(Locale.ROOT)
-                val value = parseLiteral(m.groupValues[2])
+                val rawImm = m.groupValues[2].trim()
+                val value = parseLiteral(rawImm)
                 if (reg != "r15" && value != null && value in -128..127) {
-                    out[i] = render(p, "ibt ${m.groupValues[1]}, #${m.groupValues[2].trim()}")
+                    val formattedImm = if (value < 0) "#<($rawImm)" else "#$rawImm"
+                    out[i] = render(p, "ibt ${m.groupValues[1]}, $formattedImm")
                     return@let
                 }
             }
@@ -190,7 +171,7 @@ object SfxPeepholeOptimizer {
                 val prevMn = if (prev >= 0) parse(out[prev]!!)?.mnemonic else null
                 val next = nextInstruction(i)
                 val nextMn = if (next >= 0) parse(out[next]!!)?.mnemonic else null
-                if (prevMn != "with" && prevMn != "from" && nextMn != null && nextMn in SREG_READERS) {
+                if (prevMn != "with" && prevMn != "from" && readsSreg(nextMn)) {
                     out[i] = if (p.comment.isNotEmpty()) render(p, "") else null
                     continue
                 }

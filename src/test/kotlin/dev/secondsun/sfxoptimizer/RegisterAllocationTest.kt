@@ -1,6 +1,7 @@
-
 package dev.secondsun.sfxoptimizer
 
+import dev.secondsun.retro.util.CA65Scanner
+import dev.secondsun.sfxoptimizer.analysis.SfxProgramAnalyzer
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -15,73 +16,65 @@ class RegisterAllocationTest {
             ; Out : R3 a fixed88 reciprocal
             function reciprocal in
                 register dividend, divisor, remainder, quotient
-            
+
                 iwt dividend, #$1
                 move divisor, in
                 move remainder, dividend;
                 iwt quotient, #0 ; r0 =  ()
-                
+
                 for #$10
                     with remainder
                     add remainder
-                    
+
                     from remainder
                     cmp divisor
                     bmi lp
                     nop
-                        
+
                     with quotient
                     add quotient
                     with quotient
                     add 1 ;quotient++
                     with remainder
                     sub divisor
-                lp: 	
+                lp:
                 endfor
                 move r3, quotient
-                return 
+                return
             endfunction
-            
+
             register toRecip
             iwt toRecip, #$0800
-            
+
             call reciprocal toRecip
-            
+
             stop
-            
-            """.trimMargin()
+            """.trimIndent()
 
-        val mainLine = program.lines().indexOfFirst { it.trim().startsWith("register toRecip") }
-        val graph = graph(program, mainLine)
+        val tokenized = CA65Scanner().tokenize(program)
+        val analysis = SfxProgramAnalyzer.analyze(tokenized, program.lines())
 
-        val report = allocate(graph)
+        val fn = requireNotNull(analysis.functions.find { it.name == "reciprocal" }) { "Function allocations should contain reciprocal" }
+        assertTrue(fn.allocatedMap.isNotEmpty(), "Function allocations should not be empty")
 
-        val fnAlloc = requireNotNull(report.functionAllocations["reciprocal"]) { "Function allocations should contain reciprocal" }
-        assertTrue(fnAlloc.isNotEmpty(), "Function allocations should not be empty")
-
-        // Verify that every declared variable was allocated to a register (no spills)
+        // Verify that every declared variable was allocated to a hardware register (no spills)
         listOf("dividend", "divisor", "remainder", "quotient", "in").forEach { label ->
-            val result = fnAlloc[IntervalKey.LabelKey(label)]
-            assertNotNull(result, "Label $label should have an allocation result")
-            assertTrue(result is AllocationResult.Register, "Label $label should be allocated to a hardware register")
-            println("Allocated $label -> ${(result as AllocationResult.Register).register}")
+            val reg = fn.allocatedMap[label]
+            assertNotNull(reg, "Label $label should be allocated to a hardware register")
         }
 
-        // Verify non-interference: interfering variables must NOT share registers
-        val divisorReg = (fnAlloc[IntervalKey.LabelKey("divisor")] as AllocationResult.Register).register
-        val remainderReg = (fnAlloc[IntervalKey.LabelKey("remainder")] as AllocationResult.Register).register
-        val quotientReg = (fnAlloc[IntervalKey.LabelKey("quotient")] as AllocationResult.Register).register
+        // Verify non-interference: interfering variables inside loop must NOT share registers
+        val divisorReg = fn.allocatedMap.getValue("divisor")
+        val remainderReg = fn.allocatedMap.getValue("remainder")
+        val quotientReg = fn.allocatedMap.getValue("quotient")
 
         assertFalse(divisorReg == remainderReg, "divisor and remainder interfere and cannot share a register")
         assertFalse(remainderReg == quotientReg, "remainder and quotient interfere and cannot share a register")
         assertFalse(divisorReg == quotientReg, "divisor and quotient interfere and cannot share a register")
 
         // Main body allocation
-        val mainAlloc = report.mainAllocation
-        val toRecipResult = mainAlloc[IntervalKey.LabelKey("toRecip")]
-        assertNotNull(toRecipResult, "toRecip should be allocated")
-        assertTrue(toRecipResult is AllocationResult.Register, "toRecip should be allocated to a register")
-        println("Allocated toRecip -> ${(toRecipResult as AllocationResult.Register).register}")
+        val main = requireNotNull(analysis.main) { "Main analysis should be present" }
+        assertNotNull(main.allocatedMap["torecip"], "toRecip should be allocated to a hardware register")
     }
 
     @Test

@@ -48,6 +48,7 @@ data class FunctionBoundary(
     val params: List<String> = emptyList(),
     val headerReturnVar: String? = null,
     val inferredReturnVar: String? = null,
+    val isInline: Boolean = false,
 ) {
     val effectiveReturnVar: String?
         get() = headerReturnVar ?: inferredReturnVar
@@ -85,6 +86,10 @@ data class FunctionAnalysis(
     val intervals: Map<IntervalKey, Interval>,
     val loops: List<IntRange>,
     val effects: Map<Int, LineEffect>,
+    val cfg: ScopeCfg = ScopeCfg(name, emptyList(), emptyList()),
+    val interferences: Map<IntervalKey, Set<IntervalKey>> = emptyMap(),
+    val liveAfterByLine: Map<Int, Set<IntervalKey>> = emptyMap(),
+    val isInline: Boolean = false,
 )
 
 /**
@@ -98,6 +103,9 @@ data class MainAnalysis(
     val intervals: Map<IntervalKey, Interval>,
     val loops: List<IntRange>,
     val effects: Map<Int, LineEffect>,
+    val cfg: ScopeCfg = ScopeCfg("(main)", emptyList(), emptyList()),
+    val interferences: Map<IntervalKey, Set<IntervalKey>> = emptyMap(),
+    val liveAfterByLine: Map<Int, Set<IntervalKey>> = emptyMap(),
 )
 
 /**
@@ -112,4 +120,6 @@ data class ProgramAnalysisResult(
     val allIntervals: List<Interval>,
     val maxRegisterPressure: Int,
     val pressureStatus: String,
+    val blocks: List<CfgBlock> = emptyList(),
+    val warnings: List<String> = emptyList(),
 )

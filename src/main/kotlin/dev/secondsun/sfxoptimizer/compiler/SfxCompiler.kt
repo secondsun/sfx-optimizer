@@ -10,20 +10,24 @@ import dev.secondsun.sfxoptimizer.IntervalKey
 import dev.secondsun.sfxoptimizer.analysis.CallArg
 import dev.secondsun.sfxoptimizer.analysis.DeclaredRegister
 import dev.secondsun.sfxoptimizer.analysis.FunctionBoundary
+import dev.secondsun.sfxoptimizer.analysis.NaturalLoop
 import dev.secondsun.sfxoptimizer.analysis.SfxLivenessAnalyzer
 import dev.secondsun.sfxoptimizer.analysis.SfxProgramAnalyzer
+import dev.secondsun.sfxoptimizer.macro.SourceOrigin
 import dev.secondsun.sfxoptimizer.solver.ParallelMoveResolver
 import java.io.File
+import java.net.URI
 import java.util.Locale
 
 /**
  * Compiler and lowering pass for SuperFX (.sgs / .i) assembly files.
  *
  * Performs:
- * 1. Recursive `.include` resolution and deduplication
- * 2. Delegates liveness, call-graph ordering, and hardware-constrained register allocation to SfxProgramAnalyzer
- * 3. Lowers `register`, `function`, `return`, `call` (with parallel moves and caller-save push/pop),
- *    and variable token replacement into standard ca65 SuperFX assembly.
+ * 1. Recursive `.include` resolution and deduplication with 1-based [SourceOrigin] provenance
+ * 2. Pre-allocation function inlining ([SfxInliner])
+ * 3. Liveness, [dev.secondsun.sfxoptimizer.analysis.ScopeCfg] construction, and Chaitin-Briggs register allocation ([SfxProgramAnalyzer])
+ * 4. Lowering of `register`, `function`, `return`, `call` (with parallel moves, caller-save push/pop, and ADR-0001 loop-invariant hoisting),
+ *    and variable token replacement into standard ca65 SuperFX assembly, followed by [SfxPeepholeOptimizer].
  */
 class SfxCompiler(
     private val enableInlining: Boolean = true,
@@ -43,6 +47,7 @@ class SfxCompiler(
         val loweredSource: String,
         val functionInfos: Map<String, AllocatedFunctionInfo>,
         val mainAllocations: Map<String, Constants.Register>,
+        val warnings: List<String> = emptyList(),
     )
 
     fun compileFile(
@@ -51,8 +56,15 @@ class SfxCompiler(
     ): CompilationResult {
         val includedCanonicals = mutableSetOf<String>()
         includedCanonicals.add(inputFile.canonicalPath)
-        val expanded = expandIncludes(inputFile.readText(), inputFile.parentFile ?: File("."), includeDirs, includedCanonicals)
-        return compileExpanded(expanded)
+        val (lines, origins) =
+            expandIncludes(
+                source = inputFile.readText(),
+                sourceUri = inputFile.toURI(),
+                currentDir = inputFile.parentFile ?: File("."),
+                includeDirs = includeDirs,
+                includedCanonicals = includedCanonicals,
+            )
+        return compileExpanded(lines, origins)
     }
 
     fun compileSource(
@@ -61,25 +73,36 @@ class SfxCompiler(
         includeDirs: List<File> = emptyList(),
     ): CompilationResult {
         val includedCanonicals = mutableSetOf<String>()
-        val expanded = expandIncludes(source, baseDir, includeDirs, includedCanonicals)
-        return compileExpanded(expanded)
+        val (lines, origins) =
+            expandIncludes(
+                source = source,
+                sourceUri = null,
+                currentDir = baseDir,
+                includeDirs = includeDirs,
+                includedCanonicals = includedCanonicals,
+            )
+        return compileExpanded(lines, origins)
     }
 
     private fun expandIncludes(
         source: String,
+        sourceUri: URI?,
         currentDir: File,
         includeDirs: List<File>,
         includedCanonicals: MutableSet<String>,
-    ): String {
+    ): Pair<List<String>, List<SourceOrigin>> {
         val includeRegex = Regex("""^\s*\.include\s+"([^"]+)"\s*(?:;.*)?$""", RegexOption.IGNORE_CASE)
         val outLines = mutableListOf<String>()
+        val outOrigins = mutableListOf<SourceOrigin>()
 
-        for (line in source.lines()) {
+        for ((idx, line) in source.lines().withIndex()) {
+            val lineOrigin = SourceOrigin(sourceUri, idx + 1)
             val match = includeRegex.matchEntire(line)
             if (match != null) {
                 val incPath = match.groupValues[1]
                 if (incPath.equals("libSFX.i", ignoreCase = true)) {
                     outLines.add(line)
+                    outOrigins.add(lineOrigin)
                     continue
                 }
                 val resolved = resolveIncludeFile(incPath, currentDir, includeDirs)
@@ -87,26 +110,33 @@ class SfxCompiler(
                     val canon = resolved.canonicalPath
                     if (!includedCanonicals.add(canon)) {
                         outLines.add("; [sfx-optimizer] skipped duplicate include: $incPath")
+                        outOrigins.add(lineOrigin)
                     } else {
                         outLines.add("; --- begin include: $incPath ---")
-                        val subExpanded =
+                        outOrigins.add(lineOrigin)
+                        val (subLines, subOrigins) =
                             expandIncludes(
-                                resolved.readText(),
-                                resolved.parentFile ?: currentDir,
-                                includeDirs,
-                                includedCanonicals,
+                                source = resolved.readText(),
+                                sourceUri = resolved.toURI(),
+                                currentDir = resolved.parentFile ?: currentDir,
+                                includeDirs = includeDirs,
+                                includedCanonicals = includedCanonicals,
                             )
-                        outLines.add(subExpanded)
+                        outLines.addAll(subLines)
+                        outOrigins.addAll(subOrigins)
                         outLines.add("; --- end include: $incPath ---")
+                        outOrigins.add(lineOrigin)
                     }
                 } else {
                     outLines.add(line)
+                    outOrigins.add(lineOrigin)
                 }
             } else {
                 outLines.add(line)
+                outOrigins.add(lineOrigin)
             }
         }
-        return outLines.joinToString("\n")
+        return outLines to outOrigins
     }
 
     private fun resolveIncludeFile(
@@ -123,11 +153,19 @@ class SfxCompiler(
         return null
     }
 
-    private fun compileExpanded(rawExpandedSource: String): CompilationResult {
-        val expandedSource = if (enableInlining) SfxInliner(inlineThreshold).inline(rawExpandedSource) else rawExpandedSource
+    private fun compileExpanded(
+        initialLines: List<String>,
+        initialOrigins: List<SourceOrigin>,
+    ): CompilationResult {
+        val (rawLines, origins) =
+            if (enableInlining) {
+                SfxInliner(inlineThreshold).inlineWithProvenance(initialLines, initialOrigins)
+            } else {
+                initialLines to initialOrigins
+            }
+        val expandedSource = rawLines.joinToString("\n")
         val scanner = CA65Scanner()
         val tokenizedFile = scanner.tokenize(expandedSource)
-        val rawLines = expandedSource.lines()
         val macroLines = SfxLivenessAnalyzer.findMacroDefinitionLines(rawLines)
 
         val analysis = SfxProgramAnalyzer.analyze(tokenizedFile, rawLines, macroLines)
@@ -149,12 +187,15 @@ class SfxCompiler(
             lowerScopeLines(
                 tokenizedFile = tokenizedFile,
                 rawLines = rawLines,
+                origins = origins,
                 loweredLines = loweredLines,
                 scopeLines = fnLines,
                 declaredRegisters = fn.declaredRegisters,
                 varToReg = fn.allocatedMap,
                 intervals = fn.intervals,
                 loops = fn.loops,
+                naturalLoops = fn.cfg.loops,
+                liveAfterByLine = fn.liveAfterByLine,
                 allocatedFunctions = allocatedFunctions,
                 enclosingFunction =
                     FunctionBoundary(
@@ -164,6 +205,7 @@ class SfxCompiler(
                         params = fn.params,
                         headerReturnVar = fn.effectiveReturnVar,
                         inferredReturnVar = null,
+                        isInline = fn.isInline,
                     ),
                 enclosingFunctionInfo = info,
             )
@@ -180,12 +222,15 @@ class SfxCompiler(
             lowerScopeLines(
                 tokenizedFile = tokenizedFile,
                 rawLines = rawLines,
+                origins = origins,
                 loweredLines = loweredLines,
                 scopeLines = mainLines,
                 declaredRegisters = analysis.main.declaredRegisters,
                 varToReg = mainAllocations,
                 intervals = analysis.main.intervals,
                 loops = analysis.main.loops,
+                naturalLoops = analysis.main.cfg.loops,
+                liveAfterByLine = analysis.main.liveAfterByLine,
                 allocatedFunctions = allocatedFunctions,
                 enclosingFunction = null,
                 enclosingFunctionInfo = null,
@@ -196,6 +241,7 @@ class SfxCompiler(
             loweredSource = loweredLines.joinToString("\n").let { if (enablePeephole) SfxPeepholeOptimizer.optimize(it) else it },
             functionInfos = allocatedFunctions,
             mainAllocations = mainAllocations,
+            warnings = analysis.warnings,
         )
     }
 
@@ -205,6 +251,15 @@ class SfxCompiler(
     ): Constants.Register? {
         val lower = name.lowercase(Locale.ROOT)
         return Constants.register(lower) ?: varToReg[lower]
+    }
+
+    private fun formatOrigin(
+        origins: List<SourceOrigin>,
+        lineIdx: Int,
+    ): String {
+        val origin = origins.getOrNull(lineIdx) ?: SourceOrigin(null, lineIdx + 1)
+        val filePart = origin.uri?.path?.substringAfterLast('/')
+        return if (!filePart.isNullOrEmpty()) "$filePart:${origin.line1}" else "line ${origin.line1}"
     }
 
     private fun isLiveAfterCall(
@@ -239,18 +294,21 @@ class SfxCompiler(
     private fun lowerScopeLines(
         tokenizedFile: TokenizedFile,
         rawLines: List<String>,
+        origins: List<SourceOrigin>,
         loweredLines: MutableList<String>,
         scopeLines: Set<Int>,
         declaredRegisters: Map<String, DeclaredRegister>,
         varToReg: Map<String, Constants.Register>,
         intervals: Map<IntervalKey, Interval>,
         loops: List<IntRange>,
+        naturalLoops: List<NaturalLoop>,
+        liveAfterByLine: Map<Int, Set<IntervalKey>>,
         allocatedFunctions: Map<String, AllocatedFunctionInfo>,
         enclosingFunction: FunctionBoundary?,
         enclosingFunctionInfo: AllocatedFunctionInfo?,
     ) {
         val moveResolver = ParallelMoveResolver()
-        // Hoisted caller-saves: loop line -> registers to push before / pop after
+        // Hoisted caller-saves: loop line range -> registers to push before / pop after
         val hoistedByLoop = linkedMapOf<IntRange, MutableSet<Constants.Register>>()
 
         for (lineIdx in scopeLines.sorted()) {
@@ -338,7 +396,10 @@ class SfxCompiler(
                         for ((key, intv) in intervals) {
                             if (key !is IntervalKey.LabelKey) continue
                             if (key == destKey) continue
-                            if (isLiveAfterCall(intv, lineIdx, loops)) {
+                            val liveAcrossCall =
+                                liveAfterByLine[lineIdx]?.contains(key)
+                                    ?: isLiveAfterCall(intv, lineIdx, loops)
+                            if (liveAcrossCall) {
                                 val reg = varToReg[key.label.lowercase(Locale.ROOT)] ?: continue
                                 if (reg != destReg && reg in calleeInfo.clobberedRegisters && reg !in callerSaveRegs) {
                                     callerSaveRegs.add(reg)
@@ -352,9 +413,9 @@ class SfxCompiler(
                         val it = callerSaveRegs.iterator()
                         while (it.hasNext()) {
                             val reg = it.next()
-                            val loop = findHoistLoop(reg, lineIdx, loops, intervals, varToReg, rawLines)
-                            if (loop != null) {
-                                hoistedByLoop.getOrPut(loop) { sortedSetOf(compareBy { r -> r.ordinal }) }.add(reg)
+                            val loopRange = findHoistLoop(reg, lineIdx, naturalLoops, intervals, varToReg)
+                            if (loopRange != null) {
+                                hoistedByLoop.getOrPut(loopRange) { sortedSetOf(compareBy { r -> r.ordinal }) }.add(reg)
                                 it.remove()
                             }
                         }
@@ -377,7 +438,10 @@ class SfxCompiler(
                                     val srcReg =
                                         resolveNameToRegister(arg.name, varToReg)
                                             ?: error(
-                                                "Unknown register or variable '${arg.name}' in call to '${call.target}' at line ${lineIdx + 1}",
+                                                "Unknown register or variable '${arg.name}' in call to '${call.target}' at ${formatOrigin(
+                                                    origins,
+                                                    lineIdx,
+                                                )}",
                                             )
                                     regMoves.add(Pair(srcReg, dstParamReg))
                                 }
@@ -426,7 +490,12 @@ class SfxCompiler(
                 if (lower in declaredRegisters && !Constants.isRegister(lower)) {
                     val reg =
                         varToReg[lower]
-                            ?: error("Variable '${tok.text()}' on line ${lineIdx + 1} was not allocated a register (possible spill)")
+                            ?: error(
+                                "Variable '${tok.text()}' at ${formatOrigin(
+                                    origins,
+                                    lineIdx,
+                                )} was not allocated a register (possible spill)",
+                            )
                     val actualStart = tok.endIndex - tok.text().length
                     replacements.add(Triple(actualStart, tok.endIndex, reg.name.lowercase(Locale.ROOT)))
                 }
@@ -452,34 +521,25 @@ class SfxCompiler(
         }
     }
 
-    private val branchMnemonics =
-        setOf("bra", "beq", "bne", "bcc", "bcs", "bpl", "bmi", "bvc", "bvs", "blt", "bge", "jmp", "ljmp")
-
     /**
-     * Returns the outermost hardware `for`/`forR` loop around [callLine] across which [reg] can have its
-     * caller-save push/pop hoisted: the register is neither read nor written inside the loop (it is only
-     * live across it, so the callee clobbering it per iteration is harmless) and the loop has no early exit.
+     * ADR-0001 Loop-Invariant Caller-Save Hoisting:
+     * Returns the outermost hardware `for`/`forR` [NaturalLoop] around [callLine] across which [reg]
+     * is neither read nor written inside the loop and the loop has no early exit.
      */
     private fun findHoistLoop(
         reg: Constants.Register,
         callLine: Int,
-        loops: List<IntRange>,
+        naturalLoops: List<NaturalLoop>,
         intervals: Map<IntervalKey, Interval>,
         varToReg: Map<String, Constants.Register>,
-        rawLines: List<String>,
     ): IntRange? {
-        fun mnemonicOf(line: Int): String =
-            rawLines[line]
-                .substringBefore(';')
-                .replace(Regex("""^\s*[@\w.]+:"""), "")
-                .trim()
-                .substringBefore(' ')
-                .lowercase(Locale.ROOT)
+        val candidates =
+            naturalLoops
+                .filter { it.isHardwareForLoop && !it.hasEarlyExit && callLine in it.lineRange }
+                .sortedByDescending { it.endLine - it.startLine }
 
-        for (loop in loops.filter { callLine in it }.sortedByDescending { it.last - it.first }) {
-            val startMn = mnemonicOf(loop.first)
-            if ((startMn != "for" && startMn != "forr") || mnemonicOf(loop.last) != "endfor") continue
-
+        for (loop in candidates) {
+            val range = loop.lineRange
             val touched =
                 intervals.any { (key, intv) ->
                     val r =
@@ -487,35 +547,11 @@ class SfxCompiler(
                             is IntervalKey.RegisterKey -> key.register
                             is IntervalKey.LabelKey -> varToReg[key.label.lowercase(Locale.ROOT)]
                         }
-                    r == reg && (intv.reads.any { it in loop } || intv.writes.any { it in loop })
+                    r == reg && (intv.reads.any { it in range } || intv.writes.any { it in range })
                 }
-            if (touched) continue
-
-            val labelsInLoop =
-                loop
-                    .mapNotNull {
-                        Regex(
-                            """^\s*(@?\w+):""",
-                        ).find(rawLines[it].substringBefore(';'))?.groupValues?.get(1)?.lowercase(Locale.ROOT)
-                    }.toSet()
-            val earlyExit =
-                loop.any { l ->
-                    val mn = mnemonicOf(l)
-                    if (mn == "return") return@any true
-                    if (mn in branchMnemonics) {
-                        val target =
-                            rawLines[l]
-                                .substringBefore(';')
-                                .trim()
-                                .substringAfter(' ', "")
-                                .trim()
-                                .lowercase(Locale.ROOT)
-                        target !in labelsInLoop
-                    } else {
-                        false
-                    }
-                }
-            if (!earlyExit) return loop
+            if (!touched) {
+                return range
+            }
         }
         return null
     }

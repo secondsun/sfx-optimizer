@@ -11,7 +11,7 @@ class SfxOptimizationsTest {
     // ---- Peephole ----
 
     @Test
-    fun `peephole narrows signed 8-bit iwt and keeps others`() {
+    fun `peephole narrows signed 8-bit iwt using masked negative immediate and keeps others`() {
         val out =
             lines(
                 SfxPeepholeOptimizer.optimize(
@@ -26,7 +26,7 @@ class SfxOptimizationsTest {
                 ),
             )
         assertEquals(
-            listOf("ibt r3, #0", "ibt r4, #-16", "ibt r4, #${'$'}007F", "iwt r4, #128", "iwt r4, #SYMBOL", "iwt r4, #SYMBOL+1"),
+            listOf("ibt r3, #0", "ibt r4, #<(-16)", "ibt r4, #${'$'}007F", "iwt r4, #128", "iwt r4, #SYMBOL", "iwt r4, #SYMBOL+1"),
             out,
         )
     }
@@ -102,6 +102,41 @@ class SfxOptimizationsTest {
     }
 
     @Test
+    fun `inline function mutating param via if_lt or call copies param so caller variable is preserved`() {
+        val src =
+            """
+            function step_fn a : b
+                from a
+                to b
+                add #1
+                return b
+            endfunction
+
+            inline function clamp_and_step v : out
+                if_lt v, #0, { ibt v, #0 }
+                call step_fn v : v
+                return v
+            endfunction
+
+            register orig = r4, res = r5
+            ibt orig, #-5
+            call clamp_and_step orig : res
+            from orig
+            stw (r1)
+            stop
+            """.trimIndent()
+
+        val inlined = SfxInliner().inline(src)
+        // Because `v` is mutated via both `if_lt` and `call step_fn v : v`, the inliner must bind a fresh
+        // local copy `__inline_clamp_and_step_0_v` (`move __inline_clamp_and_step_0_v, orig`) instead of aliasing `orig`!
+        assertTrue(inlined.contains("__inline_clamp_and_step_0_v"), inlined)
+        assertTrue(inlined.contains("move __inline_clamp_and_step_0_v, orig"), inlined)
+
+        val compiled = SfxCompiler().compileSource(src)
+        assertFalse(compiled.loweredSource.contains("ibt r4, #0"), compiled.loweredSource)
+    }
+
+    @Test
     fun `leaf function called inside a loop is auto inlined but kept standalone`() {
         val src =
             """
@@ -172,6 +207,77 @@ class SfxOptimizationsTest {
         assertTrue(lowered.contains("@pos_inline_0:"), lowered)
         assertTrue(lowered.contains("@pos_inline_1:"), lowered)
         assertFalse(lowered.contains("call clamp"), lowered)
+    }
+
+    @Test
+    fun `inlining alpha renames non cheap body labels so inline exit scope is preserved`() {
+        val src =
+            """
+            inline function signed_step v : out
+                iwt r12, #2
+                iwt r13, #step_loop
+            step_loop:
+                with v
+                add #1
+                loop
+                nop
+                from v
+                bmi negate
+                nop
+                move out, v
+                return out
+            negate:
+                from v
+                to out
+                not
+                return out
+            endfunction
+
+            test_call:
+                register a, b, c
+                ibt a, #3
+                call signed_step a : b
+                call signed_step b : c
+                stop
+            """.trimIndent()
+        val lowered = SfxCompiler().compileSource(src).loweredSource
+        assertTrue(lowered.contains("#@step_loop_inline_0"), lowered)
+        assertTrue(lowered.contains("@step_loop_inline_0:"), lowered)
+        assertTrue(lowered.contains("bmi @negate_inline_0"), lowered)
+        assertTrue(lowered.contains("@negate_inline_0:"), lowered)
+        assertTrue(lowered.contains("@negate_inline_1:"), lowered)
+        assertTrue(lowered.contains("bra @inline_exit_0"), lowered)
+        assertTrue(lowered.contains("@inline_exit_0:"), lowered)
+        assertFalse(lowered.contains("\nnegate:"), lowered)
+    }
+
+    @Test
+    fun `inliner skips call site when body invokes macro defined after call site`() {
+        val src =
+            """
+            register x, y
+            iwt r12, #4
+            iwt r13, #hot_loop
+            hot_loop:
+                ibt x, #2
+                call uses_bottom_macro x : y
+                loop
+                nop
+            stop
+
+            .macro bottom_macro src, dst
+                from src
+                to dst
+                add src
+            .endmacro
+
+            function uses_bottom_macro a : out
+                bottom_macro a, out
+                return out
+            endfunction
+            """.trimIndent()
+        val lowered = SfxCompiler().compileSource(src).loweredSource
+        assertTrue(lowered.contains("call uses_bottom_macro"), lowered)
     }
 
     // ---- Loop caller-save hoisting ----

@@ -3,6 +3,9 @@ package dev.secondsun.sfxoptimizer.analysis
 import dev.secondsun.retro.util.FunctionSyntaxHelper
 import dev.secondsun.retro.util.Token
 import dev.secondsun.retro.util.TokenType
+import dev.secondsun.retro.util.WorkspaceSnapshot
+import dev.secondsun.retro.util.sfx.MacroEffectSummary
+import dev.secondsun.retro.util.sfx.SuperFxIsa
 import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.sfxoptimizer.Constants
 import dev.secondsun.sfxoptimizer.Interval
@@ -14,7 +17,6 @@ object SfxLivenessAnalyzer {
     private val r1Key = IntervalKey.RegisterKey(Constants.Register.R1)
     private val r2Key = IntervalKey.RegisterKey(Constants.Register.R2)
     private val r4Key = IntervalKey.RegisterKey(Constants.Register.R4)
-    private val r5Key = IntervalKey.RegisterKey(Constants.Register.R5)
     private val r6Key = IntervalKey.RegisterKey(Constants.Register.R6)
     private val r7Key = IntervalKey.RegisterKey(Constants.Register.R7)
     private val r8Key = IntervalKey.RegisterKey(Constants.Register.R8)
@@ -23,38 +25,25 @@ object SfxLivenessAnalyzer {
     private val r13Key = IntervalKey.RegisterKey(Constants.Register.R13)
     private val r14Key = IntervalKey.RegisterKey(Constants.Register.R14)
 
-    private val branchMnemonics =
-        setOf(
-            "bra",
-            "beq",
-            "bne",
-            "blt",
-            "bge",
-            "bpl",
-            "bmi",
-            "bcc",
-            "bcs",
-            "bvc",
-            "bvs",
-        )
-
     fun getCodeTokens(
         file: TokenizedFile,
         lineIdx: Int,
     ): List<Token> =
-        file.getLineTokens(lineIdx)?.filter {
+        file.getLineTokens(lineIdx).filter {
             !it.text().startsWith(";")
-        } ?: emptyList()
+        }
 
     fun splitLabelPrefix(tokens: List<Token>): Pair<String?, List<Token>> {
         if (tokens.isEmpty()) return Pair(null, tokens)
         val first = tokens[0]
-        if (first.text().endsWith(":") && (first.type == TokenType.TOK_IDENT || first.type == TokenType.TOK_LOCAL_IDENT)) {
+        if (first.type == TokenType.TOK_COLON || first.text() == ":") {
+            return Pair(":", tokens.subList(1, tokens.size))
+        }
+        if (first.text().endsWith(":") && first.text().length > 1) {
             return Pair(first.text(), tokens.subList(1, tokens.size))
         }
-        if (tokens.size >= 2 && tokens[1].type == TokenType.TOK_COLON) {
-            val isAdjacent = (tokens[1].endIndex - tokens[1].text().length) == tokens[0].endIndex
-            if (isAdjacent && (first.type == TokenType.TOK_IDENT || first.type == TokenType.TOK_LOCAL_IDENT)) {
+        if (tokens.size >= 2 && (tokens[1].type == TokenType.TOK_COLON || tokens[1].text() == ":")) {
+            if (first.type == TokenType.TOK_IDENT || first.type == TokenType.TOK_LOCAL_IDENT) {
                 return Pair(first.text() + ":", tokens.subList(2, tokens.size))
             }
         }
@@ -71,7 +60,6 @@ object SfxLivenessAnalyzer {
         if (idx > 0 && tokens[idx - 1].text() == "::") return true
         if (idx + 1 < tokens.size && tokens[idx + 1].text() == "::") return true
 
-        // Walk backward to start of current comma/colon-separated operand to check for '#'
         var i = idx - 1
         var parenDepth = 0
         while (i >= 0) {
@@ -139,7 +127,10 @@ object SfxLivenessAnalyzer {
 
         var colonIdx = -1
         for (i in afterTarget.indices) {
-            if (afterTarget[i].text() == ":" || afterTarget[i].type == TokenType.TOK_COLON) {
+            if ((afterTarget[i].text() == ":" || afterTarget[i].type == TokenType.TOK_COLON) &&
+                (i == 0 || afterTarget[i - 1].text() != ":") &&
+                (i + 1 >= afterTarget.size || afterTarget[i + 1].text() != ":")
+            ) {
                 colonIdx = i
                 break
             }
@@ -189,15 +180,32 @@ object SfxLivenessAnalyzer {
         return CallStatement(target, args, dest)
     }
 
+    private val colonlessDataDirectives =
+        setOf(".byte", ".byt", ".dbyt", ".word", ".addr", ".faraddr", ".dword", ".res", ".tag", ".asciiz", ".literal")
+
     fun findMacroDefinitionLines(rawLines: List<String>): Set<Int> {
         val result = mutableSetOf<Int>()
         var depth = 0
         for (i in rawLines.indices) {
             val trimmed = rawLines[i].substringBefore(";").trim().lowercase(Locale.ROOT)
-            if (trimmed.startsWith(".macro ") || trimmed == ".macro") {
+            if (trimmed.startsWith(".macro ") ||
+                trimmed == ".macro" ||
+                trimmed.startsWith(".struct ") ||
+                trimmed == ".struct" ||
+                trimmed.startsWith(".union ") ||
+                trimmed == ".union" ||
+                trimmed.startsWith(".enum ") ||
+                trimmed == ".enum"
+            ) {
                 depth++
                 result.add(i)
-            } else if (trimmed.startsWith(".endmacro") || trimmed.startsWith(".endm")) {
+            } else if (trimmed.startsWith(".endmacro") ||
+                trimmed.startsWith(".endmac") ||
+                trimmed.startsWith(".endm") ||
+                trimmed.startsWith(".endstruct") ||
+                trimmed.startsWith(".endunion") ||
+                trimmed.startsWith(".endenum")
+            ) {
                 result.add(i)
                 depth = maxOf(0, depth - 1)
             } else if (depth > 0) {
@@ -218,6 +226,7 @@ object SfxLivenessAnalyzer {
         var currentParams = emptyList<String>()
         var headerReturnVar: String? = null
         var inferredReturnVar: String? = null
+        var currentInline = false
 
         val totalLines = maxOf(file.textLines(), rawLines.size)
         for (lineIdx in 0 until totalLines) {
@@ -234,6 +243,7 @@ object SfxLivenessAnalyzer {
                     currentParams = decl.parameters().map { it.text() }
                     headerReturnVar = decl.returnVariable().map { it.text() }.orElse(null)
                     inferredReturnVar = null
+                    currentInline = decl.isInline()
                 }
             } else if (currentName != null && FunctionSyntaxHelper.isReturn(bodyTokens)) {
                 val retStmt = FunctionSyntaxHelper.parseReturn(bodyTokens)
@@ -249,6 +259,7 @@ object SfxLivenessAnalyzer {
                         params = currentParams,
                         headerReturnVar = headerReturnVar,
                         inferredReturnVar = inferredReturnVar,
+                        isInline = currentInline,
                     ),
                 )
                 currentName = null
@@ -256,6 +267,7 @@ object SfxLivenessAnalyzer {
                 currentParams = emptyList()
                 headerReturnVar = null
                 inferredReturnVar = null
+                currentInline = false
             }
         }
 
@@ -383,6 +395,53 @@ object SfxLivenessAnalyzer {
         return declared
     }
 
+    private fun splitMacroArgGroups(args: List<Token>): List<List<Token>> {
+        if (args.isEmpty()) return emptyList()
+        val hasComma = args.any { it.type == TokenType.TOK_COMMA || it.text() == "," }
+        if (!hasComma) {
+            // Single operand or whitespace-separated simple operands
+            val groups = mutableListOf<List<Token>>()
+            var i = 0
+            while (i < args.size) {
+                if (args[i].text() == "#") {
+                    val end = (i + 2).coerceAtMost(args.size)
+                    groups.add(args.subList(i, end))
+                    i = end
+                } else if (args[i].text() == "(") {
+                    var j = i + 1
+                    var depth = 1
+                    while (j < args.size && depth > 0) {
+                        if (args[j].text() == "(") depth++
+                        if (args[j].text() == ")") depth--
+                        j++
+                    }
+                    groups.add(args.subList(i, j))
+                    i = j
+                } else {
+                    groups.add(listOf(args[i]))
+                    i++
+                }
+            }
+            return groups
+        }
+
+        val groups = mutableListOf<List<Token>>()
+        var cur = mutableListOf<Token>()
+        var depth = 0
+        for (tok in args) {
+            if (tok.text() == "(") depth++
+            if (tok.text() == ")") depth = maxOf(0, depth - 1)
+            if (depth == 0 && (tok.type == TokenType.TOK_COMMA || tok.text() == ",")) {
+                if (cur.isNotEmpty()) groups.add(cur)
+                cur = mutableListOf()
+            } else {
+                cur.add(tok)
+            }
+        }
+        if (cur.isNotEmpty()) groups.add(cur)
+        return groups
+    }
+
     fun evaluateLineEffect(
         tokens: List<Token>,
         currentPendingSource: IntervalKey?,
@@ -391,6 +450,9 @@ object SfxLivenessAnalyzer {
         params: List<String> = emptyList(),
         effectiveReturnVar: String? = null,
         lineIdx: Int = tokens.firstOrNull()?.lineNumber ?: 0,
+        file: TokenizedFile? = null,
+        snapshot: WorkspaceSnapshot? = null,
+        warnings: MutableList<String>? = null,
     ): LineEffect {
         if (tokens.isEmpty()) {
             return LineEffect(
@@ -401,9 +463,10 @@ object SfxLivenessAnalyzer {
             )
         }
 
-        val (labelPrefix, bodyTokens) = splitLabelPrefix(tokens)
-        var pendingSource = if (labelPrefix != null) null else currentPendingSource
-        var pendingDest = if (labelPrefix != null) null else currentPendingDest
+        // Zero-byte labels do NOT reset active SuperFX modal state!
+        val (_, bodyTokens) = splitLabelPrefix(tokens)
+        var pendingSource = currentPendingSource
+        var pendingDest = currentPendingDest
 
         if (bodyTokens.isEmpty()) {
             return LineEffect(
@@ -416,8 +479,11 @@ object SfxLivenessAnalyzer {
 
         val insnTok = bodyTokens[0]
         val mnemonic = insnTok.text().lowercase(Locale.ROOT)
+        val secondTok = if (bodyTokens.size >= 2) bodyTokens[1].text().lowercase(Locale.ROOT) else ""
         if (mnemonic.startsWith(".") ||
-            (bodyTokens.size >= 2 && bodyTokens[1].text() == "=") ||
+            secondTok == "=" ||
+            secondTok == ":=" ||
+            secondTok in colonlessDataDirectives ||
             mnemonic == "register" ||
             insnTok.type == TokenType.TOK_REGISTER_KEYWORD
         ) {
@@ -429,12 +495,31 @@ object SfxLivenessAnalyzer {
             )
         }
 
-        val args = bodyTokens.subList(1, bodyTokens.size)
         val explicitReads = mutableMapOf<Token, IntervalKey>()
         val explicitWrites = mutableMapOf<Token, IntervalKey>()
         val implicitReads = mutableListOf<IntervalKey>()
         val implicitWrites = mutableListOf<IntervalKey>()
         val memoryAddressKeys = mutableSetOf<IntervalKey>()
+
+        if (FunctionSyntaxHelper.isFunction(bodyTokens)) {
+            val decl = FunctionSyntaxHelper.parseFunction(bodyTokens)
+            if (!decl.isInline()) {
+                implicitReads.add(r11Key) // non-inline function pushes r11 (return address)
+            }
+            for (param in params) {
+                resolveKeyByName(param, declaredRegisters)?.let { implicitWrites.add(it) }
+            }
+            return LineEffect(
+                lineIdx = lineIdx,
+                instructionToken = insnTok,
+                implicitReads = implicitReads,
+                implicitWrites = implicitWrites,
+                nextPendingSource = null,
+                nextPendingDest = null,
+            )
+        }
+
+        val args = bodyTokens.subList(1, bodyTokens.size)
 
         fun useSource() {
             implicitReads.add(pendingSource ?: r0Key)
@@ -445,14 +530,6 @@ object SfxLivenessAnalyzer {
         }
 
         when (mnemonic) {
-            "function" -> {
-                implicitReads.add(r11Key) // function pushes r11 (return address)
-                for (param in params) {
-                    resolveKeyByName(param, declaredRegisters)?.let { implicitWrites.add(it) }
-                }
-                pendingSource = null
-                pendingDest = null
-            }
             "endfunction" -> {
                 if (effectiveReturnVar != null) {
                     resolveKeyByName(effectiveReturnVar, declaredRegisters)?.let { implicitReads.add(it) }
@@ -515,7 +592,7 @@ object SfxLivenessAnalyzer {
                 }
             }
             "alt1", "alt2", "alt3" -> {
-                // Preserves pendingSource and pendingDest
+                // Composes with active pendingSource and pendingDest without resetting!
             }
             "ldw", "ldb" -> {
                 findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) ->
@@ -531,6 +608,11 @@ object SfxLivenessAnalyzer {
                     explicitReads[tok] = key
                     memoryAddressKeys.add(key)
                 }
+                useSource()
+                pendingSource = null
+                pendingDest = null
+            }
+            "sbk" -> {
                 useSource()
                 pendingSource = null
                 pendingDest = null
@@ -579,6 +661,7 @@ object SfxLivenessAnalyzer {
             "plot" -> {
                 implicitReads.add(r1Key)
                 implicitReads.add(r2Key)
+                implicitWrites.add(r1Key) // plot auto-increments R1!
                 pendingSource = null
                 pendingDest = null
             }
@@ -631,7 +714,7 @@ object SfxLivenessAnalyzer {
                     val k = resolveKey(args[idx], declaredRegisters)
                     if (k != null) {
                         regArgs.add(Pair(args[idx], k))
-                        if ((mnemonic == "moveb" || mnemonic == "movew") && idx > 0 && args[idx - 1].text() == "(") {
+                        if (idx > 0 && args[idx - 1].text() == "(") {
                             memoryAddressKeys.add(k)
                         }
                     }
@@ -640,7 +723,11 @@ object SfxLivenessAnalyzer {
                     explicitWrites[regArgs[0].first] = regArgs[0].second
                     explicitReads[regArgs[1].first] = regArgs[1].second
                 } else if (regArgs.size == 1) {
-                    explicitWrites[regArgs[0].first] = regArgs[0].second
+                    if (args.firstOrNull()?.text() == "(") {
+                        explicitReads[regArgs[0].first] = regArgs[0].second
+                    } else {
+                        explicitWrites[regArgs[0].first] = regArgs[0].second
+                    }
                 }
                 pendingSource = null
                 pendingDest = null
@@ -650,10 +737,14 @@ object SfxLivenessAnalyzer {
                 pendingSource = null
                 pendingDest = null
             }
-            "inc", "dec", "shl", "fixed88_negate" -> {
-                findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) ->
-                    explicitReads[tok] = key
-                    explicitWrites[tok] = key
+            "inc", "dec", "shl" -> {
+                val targetPair = findRegisterInArgs(args, declaredRegisters)
+                if (targetPair != null) {
+                    explicitReads[targetPair.first] = targetPair.second
+                    explicitWrites[targetPair.first] = targetPair.second
+                } else if (mnemonic == "shl") {
+                    useSource()
+                    useDest()
                 }
                 pendingSource = null
                 pendingDest = null
@@ -668,47 +759,6 @@ object SfxLivenessAnalyzer {
                         }
                     }
                 regArgs.lastOrNull()?.let { (tok, key) -> explicitReads[tok] = key }
-                pendingSource = null
-                pendingDest = null
-            }
-            "condensed_lmult" -> {
-                val regArgs =
-                    args.mapIndexedNotNull { idx, tok ->
-                        if (isInsideImmediateOrNamespace(args, idx)) null else resolveKey(tok, declaredRegisters)?.let { Pair(tok, it) }
-                    }
-                if (regArgs.size >= 2) {
-                    explicitReads[regArgs[0].first] = regArgs[0].second
-                    explicitWrites[regArgs[1].first] = regArgs[1].second
-                } else if (regArgs.size == 1) {
-                    explicitReads[regArgs[0].first] = regArgs[0].second
-                    implicitWrites.add(r0Key)
-                }
-                implicitReads.add(r6Key)
-                implicitWrites.add(r4Key)
-                pendingSource = null
-                pendingDest = null
-            }
-            "sin_lookup_rom", "cos_lookup_rom", "reciprocal_lookup_rom" -> {
-                val regArgs =
-                    args.mapIndexedNotNull { idx, tok ->
-                        if (isInsideImmediateOrNamespace(args, idx)) null else resolveKey(tok, declaredRegisters)?.let { Pair(tok, it) }
-                    }
-                if (regArgs.size >= 2) {
-                    explicitReads[regArgs[0].first] = regArgs[0].second
-                    explicitWrites[regArgs[1].first] = regArgs[1].second
-                }
-                implicitReads.add(r14Key)
-                implicitWrites.add(r14Key)
-                if (mnemonic == "cos_lookup_rom") {
-                    implicitWrites.add(r0Key)
-                }
-                pendingSource = null
-                pendingDest = null
-            }
-            "_romreadbyte", "_romreadword", "_romreadwordle" -> {
-                findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) -> explicitWrites[tok] = key }
-                implicitReads.add(r14Key)
-                implicitWrites.add(r14Key)
                 pendingSource = null
                 pendingDest = null
             }
@@ -736,6 +786,11 @@ object SfxLivenessAnalyzer {
                 pendingSource = null
                 pendingDest = null
             }
+            "gsu_stack_alloc_bytes", "gsu_stack_free_bytes", "init_stack", "backuploop" -> {
+                findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) -> explicitReads[tok] = key }
+                pendingSource = null
+                pendingDest = null
+            }
             "for" -> {
                 implicitWrites.add(r12Key)
                 implicitWrites.add(r13Key)
@@ -759,20 +814,21 @@ object SfxLivenessAnalyzer {
             }
             "if_lt", "if_gt", "if_gte", "if_eq", "if_ne", "if_lte" -> {
                 implicitWrites.add(r0Key)
-                var afterMove = false
-                var moveWriteDone = false
+                var afterWriteOp = false
+                var writeDone = false
                 for (idx in args.indices) {
                     if (isInsideImmediateOrNamespace(args, idx)) continue
                     val tokText = args[idx].text().lowercase(Locale.ROOT)
-                    if (tokText == "move" || tokText == "moves") {
-                        afterMove = true
+                    if (tokText in setOf("move", "moves", "iwt", "ibt", "lm", "lms", "lea", "to", "with", "inc", "dec", "shl")) {
+                        afterWriteOp = true
+                        writeDone = false
                         continue
                     }
                     val key = resolveKey(args[idx], declaredRegisters)
                     if (key != null) {
-                        if (afterMove && !moveWriteDone) {
+                        if (afterWriteOp && !writeDone) {
                             explicitWrites[args[idx]] = key
-                            moveWriteDone = true
+                            writeDone = true
                         } else {
                             explicitReads[args[idx]] = key
                         }
@@ -782,11 +838,68 @@ object SfxLivenessAnalyzer {
                 pendingDest = null
             }
             else -> {
-                for (idx in args.indices) {
-                    if (isInsideImmediateOrNamespace(args, idx)) continue
-                    val key = resolveKey(args[idx], declaredRegisters)
-                    if (key != null) {
-                        explicitReads[args[idx]] = key
+                if (SuperFxIsa.isMnemonic(mnemonic)) {
+                    // Branches (`bra`, `bne`, etc.), `jmp`/`ljmp`, `nop`, `cache`, `stop`
+                    findRegisterInArgs(args, declaredRegisters)?.let { (tok, key) ->
+                        explicitReads[tok] = key
+                    }
+                } else {
+                    // Derive effect automatically from ca65 .macro definition via MacroEffectSummary!
+                    val macroSummary: MacroEffectSummary? =
+                        file?.scopeTree()?.macroSummary(mnemonic)?.orElse(null)
+                            ?: snapshot?.resolveMacroSummary(mnemonic)?.orElse(null)
+
+                    if (macroSummary != null) {
+                        val argGroups = splitMacroArgGroups(args)
+                        for (pIdx in macroSummary.addressParams()) {
+                            val grp = argGroups.getOrNull(pIdx) ?: continue
+                            findRegisterInArgs(grp, declaredRegisters)?.let { (_, key) ->
+                                memoryAddressKeys.add(key)
+                            }
+                        }
+                        for (pIdx in macroSummary.upwardReadParams()) {
+                            val grp = argGroups.getOrNull(pIdx) ?: continue
+                            findRegisterInArgs(grp, declaredRegisters)?.let { (tok, key) ->
+                                explicitReads[tok] = key
+                            }
+                        }
+                        for (pIdx in macroSummary.writtenParams()) {
+                            val grp = argGroups.getOrNull(pIdx) ?: continue
+                            findRegisterInArgs(grp, declaredRegisters)?.let { (tok, key) ->
+                                explicitWrites[tok] = key
+                            }
+                        }
+                        for (physRead in macroSummary.physicalReads()) {
+                            Constants.register(physRead)?.let { reg ->
+                                if (reg != Constants.Register.R10 && reg != Constants.Register.R15) {
+                                    implicitReads.add(IntervalKey.RegisterKey(reg))
+                                }
+                            }
+                        }
+                        for (physClobber in macroSummary.physicalClobbers()) {
+                            Constants.register(physClobber)?.let { reg ->
+                                if (reg != Constants.Register.R10 && reg != Constants.Register.R15) {
+                                    implicitWrites.add(IntervalKey.RegisterKey(reg))
+                                }
+                            }
+                        }
+                    } else {
+                        for (idx in args.indices) {
+                            if (isInsideImmediateOrNamespace(args, idx)) continue
+                            val key = resolveKey(args[idx], declaredRegisters)
+                            if (key != null) {
+                                explicitReads[args[idx]] = key
+                            }
+                        }
+                        if (declaredRegisters.isNotEmpty()) {
+                            warnings?.add(
+                                "Unresolved external macro '${insnTok.text()}' at line ${lineIdx + 1}; " +
+                                    "conservatively clobbering volatile registers (r0, r4, r14).",
+                            )
+                            implicitWrites.add(r0Key)
+                            implicitWrites.add(r4Key)
+                            implicitWrites.add(r14Key)
+                        }
                     }
                 }
                 pendingSource = null
@@ -814,6 +927,8 @@ object SfxLivenessAnalyzer {
         params: List<String>,
         effectiveReturnVar: String?,
         fnStartLine: Int,
+        snapshot: WorkspaceSnapshot? = null,
+        warnings: MutableList<String>? = null,
     ): Map<Int, LineEffect> {
         val result = mutableMapOf<Int, LineEffect>()
         var pendingSource: IntervalKey? = null
@@ -832,6 +947,9 @@ object SfxLivenessAnalyzer {
                     params = params,
                     effectiveReturnVar = effectiveReturnVar,
                     lineIdx = lineIdx,
+                    file = file,
+                    snapshot = snapshot,
+                    warnings = warnings,
                 )
 
             pendingSource = effect.nextPendingSource
@@ -855,115 +973,11 @@ object SfxLivenessAnalyzer {
     fun detectLoops(
         file: TokenizedFile,
         scopeLines: Set<Int>,
-    ): List<IntRange> {
-        val loops = mutableListOf<IntRange>()
-        val forStack = ArrayDeque<Int>()
-        val namedLabels = mutableMapOf<String, Int>()
-        val anonLabels = mutableListOf<Int>()
-        var lastR13Write: Int? = null
-        var lastR13Label: String? = null
-
-        for (lineIdx in scopeLines.sorted()) {
-            val codeTokens = getCodeTokens(file, lineIdx)
-            if (codeTokens.isEmpty()) continue
-
-            val (labelPrefix, bodyTokens) = splitLabelPrefix(codeTokens)
-            if (labelPrefix != null) {
-                val lbl = labelPrefix.removeSuffix(":").trim()
-                if (lbl.isEmpty()) {
-                    anonLabels.add(lineIdx)
-                } else {
-                    namedLabels[lbl.lowercase(Locale.ROOT)] = lineIdx
-                }
-            }
-            if (bodyTokens.isEmpty()) continue
-
-            val mnemonic = bodyTokens[0].text().lowercase(Locale.ROOT)
-            val args = bodyTokens.subList(1, bodyTokens.size)
-
-            if (mnemonic == "for" || mnemonic == "forr") {
-                forStack.addLast(lineIdx)
-            } else if (mnemonic == "endfor") {
-                if (forStack.isNotEmpty()) {
-                    val start = forStack.removeLast()
-                    loops.add(start..lineIdx)
-                }
-            } else if (mnemonic == "iwt" && args.isNotEmpty() && args[0].text().equals("r15", ignoreCase = true)) {
-                val targetText =
-                    args
-                        .drop(1)
-                        .filter { it.text() != "," && it.text() != "#" }
-                        .joinToString("") { it.text().removePrefix("#") }
-                        .trim()
-                if (targetText.startsWith(":-")) {
-                    val minusCount = targetText.drop(1).count { it == '-' }
-                    val targetIdx = anonLabels.size - minusCount
-                    if (targetIdx >= 0 && targetIdx < anonLabels.size) {
-                        val targetLine = anonLabels[targetIdx]
-                        if (targetLine < lineIdx) {
-                            loops.add(targetLine..lineIdx)
-                        }
-                    }
-                } else if (targetText.isNotEmpty()) {
-                    val targetLine = namedLabels[targetText.lowercase(Locale.ROOT)]
-                    if (targetLine != null && targetLine < lineIdx) {
-                        loops.add(targetLine..lineIdx)
-                    }
-                }
-            } else if ((mnemonic == "iwt" || mnemonic == "move") && args.isNotEmpty() && args[0].text().equals("r13", ignoreCase = true)) {
-                lastR13Write = lineIdx
-                lastR13Label =
-                    if (mnemonic == "iwt" && args.size >= 2) {
-                        args
-                            .last()
-                            .text()
-                            .removePrefix("#")
-                            .trim()
-                            .lowercase(Locale.ROOT)
-                    } else {
-                        null
-                    }
-            } else if (mnemonic == "loop") {
-                val loopStart = (lastR13Label?.let { namedLabels[it] }) ?: lastR13Write
-                if (loopStart != null && loopStart < lineIdx) {
-                    loops.add(loopStart..lineIdx)
-                }
-            } else if (mnemonic in branchMnemonics && args.isNotEmpty()) {
-                val targetText = args.joinToString("") { it.text() }.trim()
-                if (targetText.startsWith(":-")) {
-                    val minusCount = targetText.drop(1).count { it == '-' }
-                    val targetIdx = anonLabels.size - minusCount
-                    if (targetIdx >= 0 && targetIdx < anonLabels.size) {
-                        val targetLine = anonLabels[targetIdx]
-                        if (targetLine < lineIdx) {
-                            loops.add(targetLine..lineIdx)
-                        }
-                    }
-                } else {
-                    val targetLine = namedLabels[targetText.lowercase(Locale.ROOT)]
-                    if (targetLine != null && targetLine < lineIdx) {
-                        loops.add(targetLine..lineIdx)
-                    }
-                }
-            } else {
-                for (tokIdx in 1 until bodyTokens.size - 1) {
-                    if (bodyTokens[tokIdx].text().lowercase(Locale.ROOT) in branchMnemonics) {
-                        val targetName =
-                            bodyTokens[tokIdx + 1]
-                                .text()
-                                .removeSuffix("}")
-                                .trim()
-                                .lowercase(Locale.ROOT)
-                        val targetLine = namedLabels[targetName]
-                        if (targetLine != null && targetLine < lineIdx) {
-                            loops.add(targetLine..lineIdx)
-                        }
-                    }
-                }
-            }
-        }
-        return loops
-    }
+    ): List<IntRange> =
+        SfxCfgBuilder
+            .buildScopeCfg(file, "scope", scopeLines)
+            .loops
+            .map { it.lineRange }
 
     fun buildIntervals(
         scopeLines: Set<Int>,
@@ -1094,6 +1108,184 @@ object SfxLivenessAnalyzer {
         return false
     }
 
+    data class CfgLiveness(
+        val liveAfterByLine: Map<Int, Set<IntervalKey>>,
+        val interferenceEdges: Map<IntervalKey, Set<IntervalKey>>,
+    )
+
+    fun computeCfgLiveness(
+        file: TokenizedFile,
+        cfg: ScopeCfg,
+        effects: Map<Int, LineEffect>,
+        activeIntervals: Map<IntervalKey, Interval>,
+        declaredRegisters: Map<String, DeclaredRegister>,
+        fnStartLine: Int? = null,
+        effectiveReturnVar: String? = null,
+    ): CfgLiveness {
+        val activeKeys = activeIntervals.keys
+        val readsByLine = HashMap<Int, LinkedHashSet<IntervalKey>>()
+        val writesByLine = HashMap<Int, LinkedHashSet<IntervalKey>>()
+
+        fun recordKey(
+            target: LinkedHashSet<IntervalKey>,
+            key: IntervalKey,
+        ) {
+            if (key in activeKeys) {
+                target.add(key)
+            }
+            if (key is IntervalKey.LabelKey) {
+                val forced = declaredRegisters[key.label.lowercase(Locale.ROOT)]?.forcedRegister
+                if (forced != null) {
+                    val regKey = IntervalKey.RegisterKey(forced)
+                    if (regKey in activeKeys) {
+                        target.add(regKey)
+                    }
+                }
+            }
+        }
+
+        for ((lineIdx, eff) in effects) {
+            val r = LinkedHashSet<IntervalKey>()
+            val w = LinkedHashSet<IntervalKey>()
+            eff.explicitReads.values.forEach { recordKey(r, it) }
+            eff.implicitReads.forEach { recordKey(r, it) }
+            eff.explicitWrites.values.forEach { recordKey(w, it) }
+            eff.implicitWrites.forEach { recordKey(w, it) }
+            if (r.isNotEmpty()) readsByLine[lineIdx] = r
+            if (w.isNotEmpty()) writesByLine[lineIdx] = w
+        }
+
+        val useMap = HashMap<String, LinkedHashSet<IntervalKey>>(cfg.blocks.size)
+        val defMap = HashMap<String, LinkedHashSet<IntervalKey>>(cfg.blocks.size)
+        val labeledBlockIds = ArrayList<String>()
+
+        for (b in cfg.blocks) {
+            val firstTokens = getCodeTokens(file, b.startLine)
+            if (splitLabelPrefix(firstTokens).first != null) {
+                labeledBlockIds.add(b.id)
+            }
+            val use = LinkedHashSet<IntervalKey>()
+            val def = LinkedHashSet<IntervalKey>()
+            for (lineIdx in b.lineIndices) {
+                readsByLine[lineIdx]?.forEach { k ->
+                    if (k != r0Key && k !in def) {
+                        use.add(k)
+                    }
+                }
+                writesByLine[lineIdx]?.forEach { k ->
+                    if (k != r0Key) {
+                        def.add(k)
+                    }
+                }
+            }
+            useMap[b.id] = use
+            defMap[b.id] = def
+        }
+
+        val liveIn = cfg.blocks.associate { it.id to LinkedHashSet<IntervalKey>() }
+        val liveOut = cfg.blocks.associate { it.id to LinkedHashSet<IntervalKey>() }
+
+        val fallthroughReturnKey =
+            effectiveReturnVar
+                ?.let { resolveKeyByName(it, declaredRegisters) }
+                ?.takeIf { it in activeKeys && it != r0Key }
+
+        if (fallthroughReturnKey != null) {
+            for (b in cfg.blocks) {
+                if (b.exits.isEmpty() && !b.terminatesWithReturnOrStop && !b.unresolvedDynamicJump) {
+                    liveOut.getValue(b.id).add(fallthroughReturnKey)
+                }
+            }
+        }
+
+        var changed = true
+        val reversedBlocks = cfg.blocks.asReversed()
+        while (changed) {
+            changed = false
+            for (b in reversedBlocks) {
+                val outSet = liveOut.getValue(b.id)
+                val prevOutSize = outSet.size
+                for (succId in b.exits) {
+                    liveIn[succId]?.let { outSet.addAll(it) }
+                }
+                if (b.unresolvedDynamicJump) {
+                    for (targetId in labeledBlockIds) {
+                        liveIn[targetId]?.let { outSet.addAll(it) }
+                    }
+                }
+                val inSet = liveIn.getValue(b.id)
+                val prevInSize = inSet.size
+                inSet.clear()
+                inSet.addAll(outSet)
+                inSet.removeAll(defMap.getValue(b.id))
+                inSet.addAll(useMap.getValue(b.id))
+                if (outSet.size != prevOutSize || inSet.size != prevInSize) {
+                    changed = true
+                }
+            }
+        }
+
+        val edges = activeKeys.associateWith { LinkedHashSet<IntervalKey>() }
+        val liveAfterByLine = HashMap<Int, Set<IntervalKey>>()
+
+        fun addClique(group: Collection<IntervalKey>) {
+            if (group.size < 2) return
+            val list = group.toList()
+            for (i in 0 until list.size) {
+                val u = list[i]
+                val uEdges = edges[u] ?: continue
+                for (j in i + 1 until list.size) {
+                    val v = list[j]
+                    if (u != v) {
+                        uEdges.add(v)
+                        edges[v]?.add(u)
+                    }
+                }
+            }
+        }
+
+        for (b in cfg.blocks) {
+            val live = LinkedHashSet(liveOut.getValue(b.id))
+            addClique(live)
+            for (lineIdx in b.lineIndices.asReversed()) {
+                liveAfterByLine[lineIdx] = LinkedHashSet(live)
+                val r = readsByLine[lineIdx] ?: emptySet()
+                val w = writesByLine[lineIdx] ?: emptySet()
+                if (r.isNotEmpty() || w.isNotEmpty()) {
+                    val activeAtLine = LinkedHashSet<IntervalKey>(live.size + r.size + w.size)
+                    activeAtLine.addAll(live)
+                    activeAtLine.addAll(r)
+                    activeAtLine.addAll(w)
+                    addClique(activeAtLine)
+                }
+                if (w.isNotEmpty()) live.removeAll(w)
+                for (rk in r) {
+                    if (rk != r0Key) live.add(rk)
+                }
+            }
+        }
+
+        if (fnStartLine != null) {
+            val entryLive = LinkedHashSet<IntervalKey>()
+            val firstBlock = cfg.blocks.firstOrNull()
+            if (firstBlock != null) {
+                entryLive.addAll(liveIn.getValue(firstBlock.id))
+            } else if (fallthroughReturnKey != null) {
+                entryLive.add(fallthroughReturnKey)
+            }
+            liveAfterByLine[fnStartLine] = entryLive
+            val r = readsByLine[fnStartLine] ?: emptySet()
+            val w = writesByLine[fnStartLine] ?: emptySet()
+            val activeAtHeader = LinkedHashSet<IntervalKey>(entryLive.size + r.size + w.size)
+            activeAtHeader.addAll(entryLive)
+            activeAtHeader.addAll(r)
+            activeAtHeader.addAll(w)
+            addClique(activeAtHeader)
+        }
+
+        return CfgLiveness(liveAfterByLine = liveAfterByLine, interferenceEdges = edges)
+    }
+
     fun computeCallerSaveAvoidance(
         file: TokenizedFile,
         scopeLines: Set<Int>,
@@ -1101,6 +1293,7 @@ object SfxLivenessAnalyzer {
         intervals: Map<IntervalKey, Interval>,
         loops: List<IntRange>,
         allocatedFunctions: Map<String, FunctionAnalysis>,
+        liveAfterByLine: Map<Int, Set<IntervalKey>>? = null,
     ): Map<IntervalKey, Set<Constants.Register>> {
         val avoid = mutableMapOf<IntervalKey, MutableSet<Constants.Register>>()
         for (lineIdx in scopeLines.sorted()) {
@@ -1113,7 +1306,10 @@ object SfxLivenessAnalyzer {
             for ((key, intv) in intervals) {
                 if (key !is IntervalKey.LabelKey) continue
                 if (key == destKey) continue
-                if (isLiveAfterCall(intv, lineIdx, loops)) {
+                val liveAcrossCall =
+                    liveAfterByLine?.get(lineIdx)?.contains(key)
+                        ?: isLiveAfterCall(intv, lineIdx, loops)
+                if (liveAcrossCall) {
                     avoid.getOrPut(key) { mutableSetOf() }.addAll(callee.clobberedRegisters)
                 }
             }

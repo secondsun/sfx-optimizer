@@ -5,6 +5,7 @@ import dev.secondsun.retro.util.vo.TokenizedFile
 import dev.secondsun.sfxoptimizer.macro.CA65MacroExpander
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import java.net.URI
 
 class MacroExpanderTest {
     private val scanner = CA65Scanner()
@@ -27,12 +28,6 @@ class MacroExpanderTest {
         val tokenized = scanner.tokenize(program)
         val expanded = expander.expand(tokenized)
 
-        // Line 0: iwt r4, #$1234
-        // Line 1: from r4
-        // Line 2: stw (r10)
-        // Line 3: inc r10
-        // Line 4: inc r10
-        // Line 5: stop
         assertEquals(6, expanded.textLines())
         assertEquals("from r4", line(expanded, 1))
         assertEquals("stw (r10)", line(expanded, 2))
@@ -68,7 +63,6 @@ class MacroExpanderTest {
         val tokenized = scanner.tokenize(program)
         val expanded = expander.expand(tokenized)
 
-        // backuploop expands to gsu_stack_push r12 then gsu_stack_push r13 (8 instructions)
         assertEquals(8, expanded.textLines())
         assertEquals("from r12", line(expanded, 0))
         assertEquals("stw (r10)", line(expanded, 1))
@@ -127,12 +121,6 @@ class MacroExpanderTest {
         val tokenized = scanner.tokenize(program)
         val expanded = expander.expand(tokenized)
 
-        // for 5 expands to:
-        // backuploop (8) + iwt r12, #5 (1) + move r13, r15 (1) = 10 lines
-        // add r1 (1 line)
-        // endfor expands to:
-        // loop (1) + nop (1) + restoreloop (8) = 10 lines
-        // Total = 21 lines
         assertEquals(21, expanded.textLines())
         assertEquals("iwt r12, #5", line(expanded, 8))
         assertEquals("move r13, r15", line(expanded, 9))
@@ -154,8 +142,43 @@ class MacroExpanderTest {
 
         assertEquals(4, expanded.textLines())
         assertEquals("with r10", line(expanded, 0))
-        assertEquals("adds 4", line(expanded, 1))
+        assertEquals("add 4", line(expanded, 1))
         assertEquals("with r10", line(expanded, 2))
         assertEquals("sub 4", line(expanded, 3))
+    }
+
+    @Test
+    fun `test expandWithProvenance preserves exact 1-based original line origins`() {
+        val uri = URI.create("file:///workspace/sample.sgs")
+        val program =
+            """
+            ; header comment (line 1)
+            .macro bump reg
+                inc reg
+            .endmacro
+
+            gsu_stack_push r4
+            @after_push: bump r2
+            stop
+            """.trimIndent()
+
+        val tokenized = scanner.tokenize(program, uri)
+        val expanded = expander.expandWithProvenance(tokenized)
+
+        // Expanded lines:
+        // 0..3: from r4 / stw (r10) / inc r10 / inc r10 -> all from original line 6
+        // 4..5: @after_push: / inc r2 -> both from original line 7
+        // 6: stop -> from original line 8
+        assertEquals(7, expanded.tokenizedFile.textLines())
+        for (i in 0..3) {
+            assertEquals(uri, expanded.originOf(i).uri)
+            assertEquals(6, expanded.originOf(i).line1)
+        }
+        assertEquals("@after_push:", line(expanded.tokenizedFile, 4))
+        assertEquals(7, expanded.originOf(4).line1)
+        assertEquals("inc r2", line(expanded.tokenizedFile, 5))
+        assertEquals(7, expanded.originOf(5).line1)
+        assertEquals("stop", line(expanded.tokenizedFile, 6))
+        assertEquals(8, expanded.originOf(6).line1)
     }
 }
