@@ -19,7 +19,15 @@ import java.util.Locale
  */
 class SfxInliner(
     private val threshold: Int = 60,
+    private val cacheBudgetBytes: Int = 512,
 ) {
+    data class InlineResult(
+        val lines: List<String>,
+        val origins: List<SourceOrigin>,
+        val inlinedCount: Int,
+        val warnings: List<String> = emptyList(),
+    )
+
     private class Fn(
         val name: String,
         val start: Int,
@@ -77,6 +85,14 @@ class SfxInliner(
         initialLines: List<String>,
         initialOrigins: List<SourceOrigin>,
     ): Pair<List<String>, List<SourceOrigin>> {
+        val res = inlineWithDetails(initialLines, initialOrigins)
+        return res.lines to res.origins
+    }
+
+    fun inlineWithDetails(
+        initialLines: List<String>,
+        initialOrigins: List<SourceOrigin>,
+    ): InlineResult {
         var lines = initialLines
         var origins =
             if (initialOrigins.size == initialLines.size) {
@@ -86,14 +102,81 @@ class SfxInliner(
             }
         siteCounter = 0
         var changedAny = false
-        repeat(8) {
-            val (nextLines, nextOrigins, changed) = pass(lines, origins)
+        val warnings = mutableListOf<String>()
+        for (passIndex in 0 until 8) {
+            val (nextLines, nextOrigins, changed) = pass(lines, origins, warnings)
             lines = nextLines
             origins = nextOrigins
-            if (!changed) return@repeat
+            if (!changed) break
             changedAny = true
         }
-        return finalize(lines, origins, changedAny)
+        val (finalLines, finalOrigins) = finalize(lines, origins, changedAny)
+        return InlineResult(
+            lines = finalLines,
+            origins = finalOrigins,
+            inlinedCount = siteCounter,
+            warnings = warnings.distinct(),
+        )
+    }
+
+    private fun estimateLineBytes(line: String): Int {
+        val b = bodyOf(line)
+        if (b.isEmpty() || b.startsWith(".")) return 0
+        val mn = b.substringBefore(' ').substringBefore('\t').lowercase(Locale.ROOT)
+        return when (mn) {
+            "register", "function", "endfunction", "inline" -> 0
+            "lm", "sm" -> 4
+            "iwt" -> 3
+            "ibt", "move", "moves", "moveb", "movew", "lmult", "fmult", "cmp", "div2",
+            "bra", "beq", "bne", "bcc", "bcs", "bpl", "bmi", "bvc", "bvs", "blt", "bge",
+            "ljmp", "lms", "sms",
+            -> 2
+            "gsu_stack_push", "gsu_stack_pop", "gsu_stack_peek" -> 6
+            "call" -> 9
+            "return" -> 7
+            "for", "forr" -> 14
+            "endfor" -> 10
+            else -> if (mn.startsWith("if_")) 10 else 1
+        }
+    }
+
+    private data class CacheRegion(
+        val range: IntRange,
+        var estimatedBytes: Int,
+    )
+
+    private fun findCacheRegions(
+        lines: List<String>,
+        macroLines: Set<Int>,
+    ): List<CacheRegion> {
+        val regions = mutableListOf<CacheRegion>()
+        var start = -1
+        var bytes = 0
+        for (i in lines.indices) {
+            if (i in macroLines) continue
+            val b = bodyOf(lines[i])
+            val mn = b.substringBefore(' ').substringBefore('\t').lowercase(Locale.ROOT)
+            if (mn == "cache") {
+                if (start >= 0) {
+                    regions.add(CacheRegion(start until i, bytes))
+                }
+                start = i
+                bytes = 1
+                continue
+            }
+            if (start >= 0) {
+                bytes += estimateLineBytes(lines[i])
+                if (mn == "endfunction" || mn == "stop") {
+                    regions.add(CacheRegion(start..i, bytes))
+                    start = -1
+                    bytes = 0
+                }
+            }
+        }
+        if (start >= 0) {
+            regions.add(CacheRegion(start until lines.size, bytes))
+        }
+        return regions
     }
 
     private fun parseFunctions(
@@ -282,6 +365,7 @@ class SfxInliner(
     private fun pass(
         lines: List<String>,
         origins: List<SourceOrigin>,
+        warnings: MutableList<String>,
     ): Triple<List<String>, List<SourceOrigin>, Boolean> {
         val fns = parseFunctions(lines, origins)
         val byName = fns.associateBy { it.name.lowercase(Locale.ROOT) }
@@ -291,6 +375,25 @@ class SfxInliner(
             fns.associate { fn ->
                 fn.name.lowercase(Locale.ROOT) to fn.body.flatMap { extractLineMnemonics(it) }.toSet()
             }
+        val fnRegisterVarCount =
+            fns.associate { fn ->
+                val declCount =
+                    fn.body.sumOf { bLine ->
+                        val b = bodyOf(bLine)
+                        val mn = b.substringBefore(' ').substringBefore('\t').lowercase(Locale.ROOT)
+                        if (mn == "register") {
+                            b.substring(mn.length).split(',').count { it.trim().isNotEmpty() }
+                        } else {
+                            0
+                        }
+                    }
+                fn.name.lowercase(Locale.ROOT) to (fn.params.size + declCount)
+            }
+        val fnEstimatedBytes =
+            fns.associate { fn ->
+                fn.name.lowercase(Locale.ROOT) to fn.body.sumOf { estimateLineBytes(it) }
+            }
+        val cacheRegions = findCacheRegions(lines, macroLines)
         val loops = loopRanges(lines, fns, macroLines)
         val outLines = mutableListOf<String>()
         val outOrigins = mutableListOf<SourceOrigin>()
@@ -310,11 +413,12 @@ class SfxInliner(
                     val defEnd = macroDefEnd[usedMn]
                     defEnd != null && defEnd > idx
                 }
+            val highRegPressure = (fnRegisterVarCount[fn.name.lowercase(Locale.ROOT)] ?: 0) >= 8
             val eligible =
                 !usesForwardMacro &&
                     (
                         fn.explicit ||
-                            (!fn.callsOthers && fn.size <= threshold && loops.any { idx in it })
+                            (!fn.callsOthers && !highRegPressure && fn.size <= threshold && loops.any { idx in it })
                     )
             if (!eligible) {
                 outLines.add(line)
@@ -332,6 +436,24 @@ class SfxInliner(
                 outLines.add(line)
                 outOrigins.add(callOrigin)
                 continue
+            }
+            // Cache-block budget guard: never inline into a `cache` block if it would exceed 512 bytes
+            val enclosingCache = cacheRegions.firstOrNull { idx in it.range }
+            if (enclosingCache != null) {
+                val deltaBytes = (fnEstimatedBytes[fn.name.lowercase(Locale.ROOT)] ?: 0) - 9
+                if (enclosingCache.estimatedBytes + maxOf(0, deltaBytes) > cacheBudgetBytes) {
+                    if (fn.explicit) {
+                        val filePart = callOrigin.uri?.path?.substringAfterLast('/') ?: "input"
+                        warnings.add(
+                            "Skipped inline of '${fn.name}' at $filePart:${callOrigin.line1} " +
+                                "(estimated cache block would exceed ${cacheBudgetBytes}B budget)",
+                        )
+                    }
+                    outLines.add(line)
+                    outOrigins.add(callOrigin)
+                    continue
+                }
+                enclosingCache.estimatedBytes += maxOf(0, deltaBytes)
             }
             val (expLines, expOrigins) =
                 expand(fn, m.groupValues[1], m.groupValues[2], args, dest, callOrigin, siteCounter++)

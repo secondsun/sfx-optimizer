@@ -90,6 +90,8 @@ data class FunctionAnalysis(
     val interferences: Map<IntervalKey, Set<IntervalKey>> = emptyMap(),
     val liveAfterByLine: Map<Int, Set<IntervalKey>> = emptyMap(),
     val isInline: Boolean = false,
+    val spilledVariables: Set<String> = emptySet(),
+    val scratchRegisters: List<Constants.Register> = emptyList(),
 )
 
 /**
@@ -106,6 +108,8 @@ data class MainAnalysis(
     val cfg: ScopeCfg = ScopeCfg("(main)", emptyList(), emptyList()),
     val interferences: Map<IntervalKey, Set<IntervalKey>> = emptyMap(),
     val liveAfterByLine: Map<Int, Set<IntervalKey>> = emptyMap(),
+    val spilledVariables: Set<String> = emptySet(),
+    val scratchRegisters: List<Constants.Register> = emptyList(),
 )
 
 /**

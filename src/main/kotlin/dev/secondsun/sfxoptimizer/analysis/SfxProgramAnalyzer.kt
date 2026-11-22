@@ -115,13 +115,46 @@ object SfxProgramAnalyzer {
                     edges = cfgLiveness.interferenceEdges,
                     precolored = precolored,
                 )
-            val allocations = allocator.allocate(interference, memoryKeys, avoidMap)
+            val paramKeepKeys =
+                fn.params
+                    .map { it.lowercase(Locale.ROOT) }
+                    .filter { !Constants.isRegister(it) }
+                    .map { IntervalKey.LabelKey(it) }
+                    .toSet()
+            val explicitlyUsedKeys =
+                effects.values
+                    .flatMap { it.explicitReads.values + it.explicitWrites.values }
+                    .toSet()
+            val (allocations, scratchRegs) =
+                allocateWithSpillScratch(
+                    allocator = allocator,
+                    interference = interference,
+                    memoryKeys = memoryKeys,
+                    avoidMap = avoidMap,
+                    preferKeepKeys = paramKeepKeys,
+                    explicitlyUsedKeys = explicitlyUsedKeys,
+                    activeIntervals = activeIntervals,
+                )
 
             val varToReg = mutableMapOf<String, Constants.Register>()
+            val spilledVars = linkedSetOf<String>()
             for ((key, res) in allocations) {
-                if (key is IntervalKey.LabelKey && res is AllocationResult.Register) {
-                    varToReg[key.label.lowercase(Locale.ROOT)] = res.register
+                if (key is IntervalKey.LabelKey) {
+                    when (res) {
+                        is AllocationResult.Register -> varToReg[key.label.lowercase(Locale.ROOT)] = res.register
+                        AllocationResult.Spill -> {
+                            if (key in explicitlyUsedKeys) {
+                                spilledVars.add(key.label.lowercase(Locale.ROOT))
+                            }
+                        }
+                    }
                 }
+            }
+            if (spilledVars.isNotEmpty()) {
+                warnings.add(
+                    "Function '${fn.name}' spilled ${spilledVars.size} variable(s) to R10 stack: " +
+                        spilledVars.joinToString(", "),
+                )
             }
 
             val paramRegs =
@@ -144,6 +177,9 @@ object SfxProgramAnalyzer {
             }
             clobbered.addAll(paramRegs)
             if (returnReg != null) clobbered.add(returnReg)
+            if (spilledVars.isNotEmpty()) {
+                clobbered.addAll(scratchRegs)
+            }
 
             for (lineIdx in fnLines) {
                 val eff = effects[lineIdx] ?: continue
@@ -182,6 +218,8 @@ object SfxProgramAnalyzer {
                     interferences = interference.edges,
                     liveAfterByLine = cfgLiveness.liveAfterByLine,
                     isInline = fn.isInline,
+                    spilledVariables = spilledVars,
+                    scratchRegisters = if (spilledVars.isNotEmpty()) scratchRegs else emptyList(),
                 )
             functionAnalyses.add(analysis)
             allocatedFunctionsMap[fn.name.lowercase(Locale.ROOT)] = analysis
@@ -244,13 +282,40 @@ object SfxProgramAnalyzer {
                 edges = mainCfgLiveness.interferenceEdges,
                 precolored = mainPrecolored,
             )
-        val mainAllocations = allocator.allocate(mainInterference, mainMemoryKeys, mainAvoid)
+        val mainExplicitlyUsedKeys =
+            mainEffects.values
+                .flatMap { it.explicitReads.values + it.explicitWrites.values }
+                .toSet()
+        val (mainAllocations, mainScratchRegs) =
+            allocateWithSpillScratch(
+                allocator = allocator,
+                interference = mainInterference,
+                memoryKeys = mainMemoryKeys,
+                avoidMap = mainAvoid,
+                preferKeepKeys = emptySet(),
+                explicitlyUsedKeys = mainExplicitlyUsedKeys,
+                activeIntervals = mainActiveIntervals,
+            )
 
         val mainVarToReg = mutableMapOf<String, Constants.Register>()
+        val mainSpilledVars = linkedSetOf<String>()
         for ((key, res) in mainAllocations) {
-            if (key is IntervalKey.LabelKey && res is AllocationResult.Register) {
-                mainVarToReg[key.label.lowercase(Locale.ROOT)] = res.register
+            if (key is IntervalKey.LabelKey) {
+                when (res) {
+                    is AllocationResult.Register -> mainVarToReg[key.label.lowercase(Locale.ROOT)] = res.register
+                    AllocationResult.Spill -> {
+                        if (key in mainExplicitlyUsedKeys) {
+                            mainSpilledVars.add(key.label.lowercase(Locale.ROOT))
+                        }
+                    }
+                }
             }
+        }
+        if (mainSpilledVars.isNotEmpty()) {
+            warnings.add(
+                "Scope '(main)' spilled ${mainSpilledVars.size} variable(s) to R10 stack: " +
+                    mainSpilledVars.joinToString(", "),
+            )
         }
 
         val nonFunctionCodeLines =
@@ -259,9 +324,13 @@ object SfxProgramAnalyzer {
             }
 
         val mainAnalysis =
-            if (mainVarToReg.isNotEmpty() || mainIntervals.values.any { it.used() } || mainCfg.blocks.isNotEmpty()) {
+            if (mainVarToReg.isNotEmpty() ||
+                mainSpilledVars.isNotEmpty() ||
+                mainIntervals.values.any { it.used() } ||
+                mainCfg.blocks.isNotEmpty()
+            ) {
                 // Only emit (main) when actual executable instructions or variables exist outside functions
-                if (mainVarToReg.isNotEmpty() || mainIntervals.values.any { it.used() }) {
+                if (mainVarToReg.isNotEmpty() || mainSpilledVars.isNotEmpty() || mainIntervals.values.any { it.used() }) {
                     MainAnalysis(
                         startLine = nonFunctionCodeLines.minOrNull() ?: 0,
                         endLine = nonFunctionCodeLines.maxOrNull() ?: maxOf(0, totalLines - 1),
@@ -273,6 +342,8 @@ object SfxProgramAnalyzer {
                         cfg = mainCfg,
                         interferences = mainInterference.edges,
                         liveAfterByLine = mainCfgLiveness.liveAfterByLine,
+                        spilledVariables = mainSpilledVars,
+                        scratchRegisters = if (mainSpilledVars.isNotEmpty()) mainScratchRegs else emptyList(),
                     )
                 } else {
                     null
@@ -334,6 +405,58 @@ object SfxProgramAnalyzer {
             blocks = allBlocks,
             warnings = warnings,
         )
+    }
+
+    private fun allocateWithSpillScratch(
+        allocator: GraphColoringAllocator,
+        interference: InterferenceGraph,
+        memoryKeys: Set<IntervalKey>,
+        avoidMap: Map<IntervalKey, Set<Constants.Register>>,
+        preferKeepKeys: Set<IntervalKey>,
+        explicitlyUsedKeys: Set<IntervalKey>,
+        activeIntervals: Map<IntervalKey, Interval>,
+    ): Pair<Map<IntervalKey, AllocationResult>, List<Constants.Register>> {
+        val initial = allocator.allocate(interference, memoryKeys, avoidMap, preferKeepKeys)
+        val hasRealSpill =
+            initial.any { (k, res) ->
+                k is IntervalKey.LabelKey &&
+                    res is AllocationResult.Spill &&
+                    k in explicitlyUsedKeys
+            }
+        if (!hasRealSpill) {
+            return initial to emptyList()
+        }
+
+        // Reserve 2 scratch registers from the address-capable pool (R1..R9, R11) that are not
+        // precolored or directly referenced as raw physical registers in this scope.
+        val reservedByUser =
+            interference.precolored.values.toSet() +
+                activeIntervals.keys
+                    .filterIsInstance<IntervalKey.RegisterKey>()
+                    .map { it.register }
+                    .toSet()
+        val scratchPreference =
+            listOf(
+                Constants.Register.R9,
+                Constants.Register.R8,
+                Constants.Register.R7,
+                Constants.Register.R5,
+                Constants.Register.R3,
+                Constants.Register.R2,
+                Constants.Register.R1,
+                Constants.Register.R11,
+                Constants.Register.R4,
+                Constants.Register.R6,
+            )
+        val chosenScratch =
+            scratchPreference
+                .filter { it !in reservedByUser }
+                .take(2)
+                .ifEmpty { scratchPreference.take(2) }
+        val reducedPool = allocator.registerPool.filter { it !in chosenScratch }
+        val spillAllocator = GraphColoringAllocator(registerPool = reducedPool)
+        val reallocated = spillAllocator.allocate(interference, memoryKeys, avoidMap, preferKeepKeys)
+        return reallocated to chosenScratch
     }
 
     private fun resolveKeyToRegister(

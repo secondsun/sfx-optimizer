@@ -891,7 +891,10 @@ object SfxLivenessAnalyzer {
                                 explicitReads[args[idx]] = key
                             }
                         }
-                        if (declaredRegisters.isNotEmpty()) {
+                        val isCa65SymbolAssign =
+                            args.isNotEmpty() &&
+                                (args[0].text().equals(".set", ignoreCase = true) || args[0].text() == "=")
+                        if (declaredRegisters.isNotEmpty() && !isCa65SymbolAssign) {
                             warnings?.add(
                                 "Unresolved external macro '${insnTok.text()}' at line ${lineIdx + 1}; " +
                                     "conservatively clobbering volatile registers (r0, r4, r14).",

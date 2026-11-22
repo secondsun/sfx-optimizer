@@ -100,6 +100,7 @@ class GraphColoringAllocator(
         graph: InterferenceGraph,
         memoryKeys: Set<IntervalKey> = emptySet(),
         avoidMap: Map<IntervalKey, Set<Constants.Register>> = emptyMap(),
+        preferKeepKeys: Set<IntervalKey> = emptySet(),
     ): Map<IntervalKey, AllocationResult> {
         val colors = mutableMapOf<IntervalKey, Constants.Register>()
 
@@ -143,10 +144,14 @@ class GraphColoringAllocator(
                 }
             val chosen =
                 candidate
-                    ?: uncoloredNodes.maxByOrNull { node ->
-                        val (deg, k) = effectiveDegree(node)
-                        deg - k
-                    }!!
+                    ?: run {
+                        // Prefer spilling non-parameter / non-protected nodes first
+                        val spillCandidates = uncoloredNodes.filter { it !in preferKeepKeys }.ifEmpty { uncoloredNodes.toList() }
+                        spillCandidates.maxByOrNull { node ->
+                            val (deg, k) = effectiveDegree(node)
+                            deg - k
+                        }!!
+                    }
             uncoloredNodes.remove(chosen)
             stack.addLast(chosen)
             for (neighbor in currentEdges[chosen] ?: emptySet()) {
