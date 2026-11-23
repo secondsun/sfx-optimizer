@@ -1,153 +1,62 @@
-# AGENTS.md — Agent & Contributor Guide for sfx-optimizer
+# AGENTS.md — Agent & Contributor Guide for `sfx-optimizer`
 
-## 1. Project Mission & Overview
-`sfx-optimizer` is a compiler pass, register allocator, and interactive visualization tool for SNES SuperFX (GSU-1 and GSU-2) assembly code written with [ca65](https://cc65.github.io/).
-It targets projects adhering to `X-GSU` and `libSFX` conventions.
+## 1. Mission & Pipeline
 
-The optimizer processes assembly source files containing high-level register pseudo-macros (`register`, `function`, `call`, `with`/`to`/`from`), builds a Control Flow Graph (CFG), tracks register variable liveness/intervals, executes a **Chaitin-Briggs Graph-Coloring Register Allocation** pass, and lowers pseudo-macros to optimized SuperFX instructions while minimizing stack spills. An integrated web-based viewer provides real-time graphical inspection of liveness swimlanes, allocations, and instruction effects.
-
----
-
-## 2. Architecture & Data Flow Pipeline
+`sfx-optimizer` is the SuperFX (GSU / FX3) compiler pass, Chaitin-Briggs register allocator, and interactive liveness viewer for `ca65` / `X-GSU` assembly. For full integration architecture, CLI demos, and A/B ROM/cycle benchmarks, see [`../docs/sfx-optimizer-pipeline-integration.md`](../docs/sfx-optimizer-pipeline-integration.md).
 
 ```
-              [CA65 Source with Pseudo-Macros]
-                             │
-                             ▼ (compiler/SfxInliner.kt + .include expansion)
-                   [CA65Scanner] ──> TokenizedFile
-                             │
-                             ▼ (analysis/SfxCfgBuilder.kt + SfxProgramAnalyzer.kt)
-                     [ScopeCfg & Liveness]
-                             │
-                             ├─────────────────────────────────────────────────┐
-                             │                                                 │
-                             ▼ (Allocator.kt)                                  ▼ (viewer/CodeAnalyzer.kt)
-               [Interference & Graph Coloring]                         [ViewerDto Serialization]
-                             │                                                 │
-                             ▼ (compiler/SfxCompiler.kt + Peephole)            ▼ (viewer/ViewerServer.kt)
-                   [Optimized CA65 Output]                             [Interactive Web UI]
+  [CA65 Source + .include] ──> CA65IncludeExpander (SourceOrigin + depfiles)
+             │
+             ▼ SfxInliner (512B cache-budget guard + >=8-var pressure guard)
+             ▼ SfxLoopInvariantHoister
+             ▼ SfxCfgBuilder + SfxLivenessAnalyzer + SfxProgramAnalyzer (ScopeCfg)
+             ├──> Allocator (2-pass Chaitin-Briggs + R10 spill scratch reservation)
+             │       ▼ SfxCompiler (symbolic regs, R10 spill frames, .dbg file/line)
+             │       ▼ SfxPeepholeOptimizer (.dbg-transparent, iwt->ibt, r0, ldw+move)
+             │       ▼ [.opt.sgs + .d depfile]
+             └──> viewer/CodeAnalyzer + ViewerServer (port 8080)
 ```
 
-### Key Modules & Files
-- [`SfxCfgBuilder.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxCfgBuilder.kt): Constructs immutable per-scope Control Flow Graphs (`ScopeCfg`, `CfgBlock`, `NaturalLoop`) with delay-slot and natural-loop extraction.
-- [`SfxProgramAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxProgramAnalyzer.kt) & [`SfxLivenessAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxLivenessAnalyzer.kt): Bottom-up scope orchestration, instruction/macro effect modeling, live-range intervals, and CFG backward dataflow interference.
-- [`Interval.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Interval.kt): Encapsulates live range start/end and read/write access points for register keys and labels.
-- [`Allocator.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Allocator.kt): Houses register allocation, interference graph generation, Chaitin-Briggs / Kempe graph coloring, pre-colored constraints, and spill handling.
-- [`SfxCompiler.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxCompiler.kt), [`SfxInliner.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxInliner.kt), & [`SfxPeepholeOptimizer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxPeepholeOptimizer.kt): Pre-allocation function inlining, parallel-move call lowering, loop-invariant caller-save hoisting, and SuperFX peephole optimization.
-- [`CA65MacroExpander.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/macro/CA65MacroExpander.kt) & [`StackDepthTracker.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/stack/StackDepthTracker.kt): Source-mapped macro expansion (`SourceOrigin`) and `ScopeCfg`-backed `R10` stack displacement verification.
-- [`Parser.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Parser.kt): Hardware register definitions (`Constants.Register`), register lookup, and parsing utilities.
-- [`CodeAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/CodeAnalyzer.kt): Adapts `SfxProgramAnalyzer` results into viewer DTOs (`ViewerDto.kt`).
-- [`ViewerServer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/ViewerServer.kt): Lightweight embedded HTTP server providing REST API endpoints (`/api/analyze`, `/api/files`, `/api/file`) and static web assets.
-- [`src/main/resources/viewer/`](src/main/resources/viewer/): Frontend assets (`index.html`, `viewer.css`, `viewer.js`) featuring interactive SVG connection curves, swimlanes, and pinned detail popovers.
+### Key Modules
+- [`SfxCfgBuilder.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxCfgBuilder.kt): Per-scope CFGs (`ScopeCfg`, `CfgBlock`, `NaturalLoop`) with delay-slot and natural-loop extraction.
+- [`SfxProgramAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxProgramAnalyzer.kt) & [`SfxLivenessAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/analysis/SfxLivenessAnalyzer.kt): Bottom-up scope orchestration, effect modeling, `explicitlyUsedKeys` filtering, 2-pass `allocateWithSpillScratch`.
+- [`Allocator.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Allocator.kt) & [`Interval.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/Interval.kt): Interference graph, Kempe graph coloring (`preferKeepKeys`), pre-colored constraints.
+- [`SfxCompiler.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxCompiler.kt), [`SfxInliner.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxInliner.kt), [`SfxPeepholeOptimizer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/compiler/SfxPeepholeOptimizer.kt): Cache/pressure-aware inlining, parallel-move call lowering, balanced `R10` stack spill frames with `ScopeCfg` `deltaSp` tracking, `.dbg file`/`.dbg line` emission, and SuperFX peephole passes.
+- [`CA65MacroExpander.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/macro/CA65MacroExpander.kt) & [`StackDepthTracker.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/stack/StackDepthTracker.kt): Source-mapped macro expansion (`SourceOrigin`) and `R10` stack displacement verification.
+- [`Main.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/Main.kt), [`CodeAnalyzer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/CodeAnalyzer.kt), [`ViewerServer.kt`](src/main/kotlin/dev/secondsun/sfxoptimizer/viewer/ViewerServer.kt): CLI entry point (`--compile`, `--depfile`, `--Werror`, `--stats`) and interactive web viewer (`src/main/resources/viewer/`).
 
 ---
 
-## 3. SuperFX (GSU) Architecture & Calling Conventions (CRITICAL)
+## 2. SuperFX Hardware Rules & Allocator Invariants
 
-The SuperFX chip (GSU) has strict hardware register behavior that agents MUST respect:
-
-1. **Register Map**:
-   - **`R0`**: Primary accumulator and default parameter/return register. Arithmetic instructions like `add`, `sub`, `and`, `or` and memory operations (`ldw`, `stw`) use `R0` implicitly if no source/dest is specified.
-   - **`R1` - `R9`**: General-purpose registers available for variable allocation.
-   - **`R10`**: **Stack Pointer**. Dedicated to the call stack convention in X-GSU (`r10 stack`). **DO NOT allocate R10 as a general variable.**
-   - **`R11` - `R13`**: General-purpose registers / link registers. Available for allocation when not reserved by specific subroutines.
-   - **`R14`**: ROM table pointer / general register.
-   - **`R15`**: **Program Counter (PC)**. Writing to R15 executes a branch/jump. **NEVER allocate R15.**
-
-2. **Prefix Instructions (`with`, `to`, `from`)**:
-   - SuperFX uses modal prefix instructions to redirect operand sources and destinations:
-     - `to Rn`: Directs the result of the *next* instruction to `Rn`.
-     - `from Rn`: Uses `Rn` as the secondary operand for the *next* instruction.
-     - `with Rn`: Simultaneously sets `to Rn` and `from Rn`.
-
-3. **Branch Delay Slots**:
-   - Branch instructions (`bra`, `beq`, `bne`, `bmi`, etc.) have a 1-instruction delay slot that is executed immediately following the jump.
+- **SuperFX (FX3) Hardware Register Roles & Constraints**: Authoritative single source of truth is [`../.agents/rules/sfx-assembly-rules.md`](../.agents/rules/sfx-assembly-rules.md) (`R0` default accumulator, `R10` ascending word stack pointer — never allocate, `R15` PC — never allocate, FX3 has no hardware `MERGE`, 4-bit immediate `#0..#15` arithmetic limit, 1-instruction modal prefix lifetime, 1-instruction branch delay slot).
+- **Declared Variables Only**: Only identifiers declared via `register` or function parameter/return lists are allocated; plain labels and constants are untouched.
+- **Pre-coloring**: `register my_var = r4` locks `my_var` to `Register.R4` in the interference graph.
+- **Strict Function Scoping**: Live ranges and interference graphs are isolated per `function ... endfunction` and `(main)`.
+- **Spill Lowering Safety**: Pass 2 reserves 2 address-capable scratch registers (`R1..R9, R11`) only when an explicitly used variable spills; address computation precedes flag-setting instructions so post-op `from`/`stw` preserves `Z/S/CY/OV` for conditional branches; `R10` offsets adjust for dynamic `deltaSp` (`for`/`forR` `+4B`, `gsu_stack_push`/`pop`).
 
 ---
 
-## 4. Register Allocation Semantics & Critical Assumptions
+## 3. Build, Test & CLI Commands
 
-When modifying the compiler, allocator, or analyzer, preserve these core assumptions:
-
-1. **Declared Variables Only**:
-   - Only identifiers declared via the `register` pseudo-macro (e.g. `register var1, var2`) or listed as function parameters (e.g. `function foo p1, p2`) are tracked in liveness swimlanes and allocated hardware registers.
-   - Standard assembly labels (e.g. branch targets `loop:`, `skip:`, data definitions, or address constants like `VECTOR_CROSS_OUT`) MUST NOT be treated as register variables.
-
-2. **Forced Register Assignments (Pre-coloring)**:
-   - Syntax: `register my_var = r4`.
-   - Forced assignments specify an explicit hardware register requirement.
-   - The token stream parses `=` via `TokenType.TOK_EQ`.
-   - The allocator adds the variable to the pre-colored map (`precolored[IntervalKey.LabelKey("my_var")] = Register.R4`). Pre-colored nodes lock the assigned color and eliminate it from neighboring candidates during Kempe simplification.
-
-3. **Strict Function Scoping**:
-   - Each `function` ... `endfunction` block defines an isolated scope.
-   - Live ranges and interference graphs MUST NOT bleed across function boundaries or into top-level code.
-   - Top-level non-function code is grouped into its own isolated `(main)` scope.
-
-4. **Implicit Register Side Effects**:
-   - SuperFX instructions with implicit register dependencies MUST be modeled for accurate liveness analysis:
-     - `ldw (Rn)`: Reads address in `Rn`, writes data to `R0`.
-     - `stw (Rn)`: Reads address in `Rn`, reads data from `R0`.
-     - `lmult` / `fmult`: Reads multiplicand from `R6`, writes low 16 bits of product to `R4` (and top bits to destination or `R0`).
-     - `merge`: Reads `R7` and `R8`, merges their contents into destination or `R0`.
-     - `romb`: Reads table offset from `R14`.
-     - `getc`, `getb`, `getbl`, `getbh`, `getbs`: Read from ROM/RAM buffer pointers.
-
----
-
-## 5. Build, Test, & Execution Commands
-
-Always use the included Maven wrapper (`./mvnw`):
-
-- **Compile and Test All**:
-  ```bash
-  ./mvnw test
-  ```
-- **Run Single Test Class**:
-  ```bash
-  ./mvnw test -Dtest=ViewerServerTest
-  ```
-- **Run Single Test Method**:
-  ```bash
-  ./mvnw test -Dtest=ViewerServerTest#test\ forced\ register\ assignment\ precoloring
-  ```
-- **Check Code Formatting (Spotless / ktlint)**:
-  ```bash
-  ./mvnw spotless:check
-  ```
-- **Apply Code Formatting (Spotless / ktlint)**:
-  ```bash
-  ./mvnw spotless:apply
-  ```
-- **Launch Interactive Code Viewer**:
-  ```bash
-  ./mvnw test -Dtest=ViewerServerTest#launchViewerManually
-  ```
-  *Or run `ViewerServerKt.main()` directly.*
-- **Compile an `.sgs` file with the CLI** (what `libSFX.make` runs; repackage first, since `target/sfx-optimizer.jar` is not rebuilt by `./mvnw test`):
+Always use `./mvnw`:
+- **Run Tests**: `./mvnw test` (or single test: `./mvnw test -Dtest=SfxPipelineIntegrationTest`)
+- **Format Check / Apply**: `./mvnw spotless:check` / `./mvnw spotless:apply`
+- **Full Verification (CI parity)**: `./mvnw clean verify -Dgpg.skip=true`
+- **Repackage & Compile `.sgs` via CLI** (`target/sfx-optimizer.jar` is not rebuilt by `test`):
   ```bash
   ./mvnw -q package -DskipTests
-  java -jar target/sfx-optimizer.jar -c <in>.sgs -o <out>.opt.sgs -I <dir-of-in> -I <libSFX/include> -I <X-GSU>
+  java -jar target/sfx-optimizer.jar -c <in>.sgs -o <out>.opt.sgs \
+    --depfile <out>.d --dep-target <out>.ogs --Werror --stats \
+    -I <dir-of-in> -I <libSFX/include>
   ```
-  Assemble the result with `snes-sfx-demo/libSFX/tools/cc65/bin/ca65 -D TARGET_GSU` to confirm it is valid.
-- **Full Verification (Tests, Javadoc, Spotless, same as CI)**:
-  ```bash
-  ./mvnw clean verify -Dgpg.skip=true
-  ```
-  Run `spotless:check` (or `verify`) before finishing; `test` alone skips formatting. The pre-commit hook enforces both.
+  Additional pass flags: `--no-inline`, `--no-hoist`, `--no-peephole`, `--no-debug-lines`, `--inline-threshold <N>`.
+  In `snes-sfx-demo`, override compiler flags via `make -C X-GSU/IsoEngine SFX_OPT_FLAGS="--Werror --stats"`.
 
 ---
 
-## 6. Coding Standards & Contributor Guidelines
+## 4. Testing Conventions
 
-1. **Kotlin Idioms (Kotlin 2.4+ / Java 26)**:
-   - Use `sealed interface` or `sealed class` for algebraic data types (`AllocationResult`, `CallArg`, `IntervalKey`).
-   - Use `data object` for singleton states in sealed hierarchies.
-   - Prefer immutable collections (`List`, `Set`, `Map`) except for internal allocation and graph structures.
-   - Use `Register.entries` rather than `Register.values()`.
-
-2. **Testing Guardrails**:
-   - Code block test snippets live in `src/test/resources/code_blocks/` as `.sgs` files. When adding new syntax features or test cases in `SfxCompilerTest.kt` or `ViewerServerTest.kt`, add corresponding test snippets in this directory so they can be inspected in the viewer.
-   - Upstream test fixtures live in `src/test/resources/homebrew/` (`X-GSU` and `libSFX`). Do not modify these assembly files unless writing tests specifically targeting new syntax.
-   - All tests live in `dev.secondsun.sfxoptimizer` matching the package structure.
-   - Follow Test-Driven Development (TDD): write or un-ignore test cases before expanding `Allocator.kt` or `CodeAnalyzer.kt`.
+- Test compiler behavior through the `SfxCompiler.compileSource` / `compileFile` seam (see [`../CODING_STANDARDS.md`](../CODING_STANDARDS.md)).
+- Viewer-inspectable `.sgs` snippets live in `src/test/resources/code_blocks/`; treat `src/test/resources/homebrew/` as read-only upstream fixtures unless specifically testing new syntax.
+- Never use `return@repeat` inside Kotlin `repeat(...)` blocks (it acts as `continue`, not `break` — enforced by pre-commit and CI).

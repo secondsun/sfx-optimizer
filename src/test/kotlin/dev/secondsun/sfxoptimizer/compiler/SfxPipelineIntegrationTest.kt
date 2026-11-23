@@ -297,7 +297,11 @@ class SfxPipelineIntegrationTest {
         // 200 * 3B = 600B > 512B budget -> inliner must skip and warn, keeping standalone function
         assertTrue(result.loweredSource.contains("call huge_helper"), result.loweredSource)
         assertTrue(result.loweredSource.contains("function huge_helper"), result.loweredSource)
-        assertTrue(result.warnings.any { it.contains("512B budget") }, "Expected cache budget warning: ${result.warnings}")
+        assertEquals(
+            1,
+            result.warnings.count { it.contains("512B budget") },
+            "Expected exactly one cache budget warning: ${result.warnings}",
+        )
     }
 
     @Test

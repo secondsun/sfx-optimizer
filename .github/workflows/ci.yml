@@ -53,6 +53,13 @@ jobs:
           </settings>
           EOF
 
+      - name: Reject Kotlin return@repeat Footgun
+        run: |
+          if grep -rn 'return@repeat' src/main/; then
+            echo "::error::Found 'return@repeat' in src/main/ (acts as continue, not break). Use a 'for' loop with 'break' instead."
+            exit 1
+          fi
+
       - name: Verify Code Style (Spotless / ktlint)
         run: ./mvnw --batch-mode --no-transfer-progress spotless:check
 
